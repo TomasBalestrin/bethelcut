@@ -54,10 +54,10 @@ export function Timeline() {
     const offsetX = -scrollX;
 
     // Draw ruler
-    ctx.fillStyle = '#0d1117';
+    ctx.fillStyle = '#060810';
     ctx.fillRect(0, 0, width, RULER_HEIGHT);
     ctx.strokeStyle = THEME.border.default;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 0.5;
     ctx.beginPath();
     ctx.moveTo(0, RULER_HEIGHT);
     ctx.lineTo(width, RULER_HEIGHT);
@@ -77,23 +77,24 @@ export function Timeline() {
 
       // Major tick
       ctx.strokeStyle = THEME.border.default;
+      ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.moveTo(x, RULER_HEIGHT - 10);
+      ctx.moveTo(x, RULER_HEIGHT - 8);
       ctx.lineTo(x, RULER_HEIGHT);
       ctx.stroke();
 
       // Label
       ctx.fillStyle = THEME.text.muted;
-      ctx.fillText(formatDuration(ms), x, RULER_HEIGHT - 14);
+      ctx.fillText(formatDuration(ms), x, RULER_HEIGHT - 12);
 
       // Minor ticks
       const minorStep = stepMs / 4;
       for (let j = 1; j < 4; j++) {
         const mx = offsetX + msToTimelinePixels(ms + j * minorStep, effectivePps);
         if (mx < 0 || mx > width) continue;
-        ctx.strokeStyle = 'rgba(51,65,85,0.5)';
+        ctx.strokeStyle = 'rgba(24,29,42,0.8)';
         ctx.beginPath();
-        ctx.moveTo(mx, RULER_HEIGHT - 5);
+        ctx.moveTo(mx, RULER_HEIGHT - 4);
         ctx.lineTo(mx, RULER_HEIGHT);
         ctx.stroke();
       }
@@ -105,11 +106,12 @@ export function Timeline() {
       const trackHeight = track.height;
 
       // Track background
-      ctx.fillStyle = trackY % 2 === 0 ? '#0f1419' : '#111827';
+      ctx.fillStyle = trackY % 2 === 0 ? '#070a11' : '#0a0d14';
       ctx.fillRect(0, trackY, width, trackHeight);
 
       // Track bottom border
-      ctx.strokeStyle = 'rgba(51,65,85,0.3)';
+      ctx.strokeStyle = 'rgba(24,29,42,0.5)';
+      ctx.lineWidth = 0.5;
       ctx.beginPath();
       ctx.moveTo(0, trackY + trackHeight);
       ctx.lineTo(width, trackY + trackHeight);
@@ -132,12 +134,12 @@ export function Timeline() {
         if (clip.clipType === 'silence_marker') clipColor = THEME.timeline.silence;
 
         // Clip rect
-        ctx.fillStyle = clipColor + '40';
-        ctx.strokeStyle = clipColor;
-        ctx.lineWidth = 1;
+        ctx.fillStyle = clipColor + '25';
+        ctx.strokeStyle = clipColor + '60';
+        ctx.lineWidth = 0.5;
         const clipY = trackY + 4;
         const clipH = trackHeight - 8;
-        const r = 4;
+        const r = 3;
 
         ctx.beginPath();
         ctx.moveTo(clipX + r, clipY);
@@ -152,29 +154,30 @@ export function Timeline() {
         ctx.fill();
         ctx.stroke();
 
-        // Clip top highlight
-        ctx.fillStyle = clipColor;
-        ctx.fillRect(clipX, clipY, clipWidth, 2);
+        // Clip top accent line
+        ctx.fillStyle = clipColor + '80';
+        ctx.fillRect(clipX, clipY, clipWidth, 1);
       }
 
       trackY += trackHeight;
     }
 
-    // Empty state (show track lanes even if no tracks)
+    // Empty state
     if (tracks.length === 0) {
       const defaultTracks = ['Video', 'Audio', 'Legendas'];
       defaultTracks.forEach((label, i) => {
         const y = RULER_HEIGHT + i * 60;
-        ctx.fillStyle = i % 2 === 0 ? '#0f1419' : '#111827';
+        ctx.fillStyle = i % 2 === 0 ? '#070a11' : '#0a0d14';
         ctx.fillRect(0, y, width, 60);
-        ctx.strokeStyle = 'rgba(51,65,85,0.3)';
+        ctx.strokeStyle = 'rgba(24,29,42,0.5)';
+        ctx.lineWidth = 0.5;
         ctx.beginPath();
         ctx.moveTo(0, y + 60);
         ctx.lineTo(width, y + 60);
         ctx.stroke();
 
         ctx.fillStyle = THEME.text.muted;
-        ctx.font = '11px Inter, system-ui, sans-serif';
+        ctx.font = '10px Inter, system-ui, sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(label, 10, y + 34);
       });
@@ -185,7 +188,7 @@ export function Timeline() {
     if (playheadX >= 0 && playheadX <= width) {
       // Playhead line
       ctx.strokeStyle = THEME.timeline.playhead;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(playheadX, 0);
       ctx.lineTo(playheadX, height);
@@ -194,9 +197,9 @@ export function Timeline() {
       // Playhead triangle
       ctx.fillStyle = THEME.timeline.playhead;
       ctx.beginPath();
-      ctx.moveTo(playheadX - 6, 0);
-      ctx.lineTo(playheadX + 6, 0);
-      ctx.lineTo(playheadX, 10);
+      ctx.moveTo(playheadX - 5, 0);
+      ctx.lineTo(playheadX + 5, 0);
+      ctx.lineTo(playheadX, 8);
       ctx.closePath();
       ctx.fill();
     }
@@ -251,12 +254,12 @@ export function Timeline() {
       <div className="flex-1 flex overflow-hidden">
         {/* Track Labels */}
         <div
-          className="flex-shrink-0 border-r border-border-default bg-bg-secondary flex flex-col"
+          className="flex-shrink-0 border-r border-border-default/60 bg-bg-secondary flex flex-col"
           style={{ width: TRACK_LABEL_WIDTH }}
         >
           {/* Ruler spacer */}
           <div
-            className="flex items-center px-2 text-[10px] text-text-muted border-b border-border-default"
+            className="flex items-center px-2 text-[10px] text-text-muted border-b border-border-default/40"
             style={{ height: RULER_HEIGHT }}
           >
             Faixas
@@ -270,32 +273,31 @@ export function Timeline() {
                 className="flex items-center justify-between px-2 border-b border-border-default/30"
                 style={{ height: track.height }}
               >
-                <span className="text-xs text-text-secondary truncate">
+                <span className="text-[11px] text-text-muted truncate">
                   {track.label}
                 </span>
                 <div className="flex items-center gap-0.5">
-                  <button className="p-0.5 rounded hover:bg-bg-hover text-text-muted">
+                  <button className="p-0.5 rounded hover:bg-bg-hover text-text-muted/60 hover:text-text-muted">
                     {track.isMuted ? (
-                      <VolumeX size={12} />
+                      <VolumeX size={11} />
                     ) : (
-                      <Volume2 size={12} />
+                      <Volume2 size={11} />
                     )}
                   </button>
-                  <button className="p-0.5 rounded hover:bg-bg-hover text-text-muted">
+                  <button className="p-0.5 rounded hover:bg-bg-hover text-text-muted/60 hover:text-text-muted">
                     {track.isHidden ? (
-                      <EyeOff size={12} />
+                      <EyeOff size={11} />
                     ) : (
-                      <Eye size={12} />
+                      <Eye size={11} />
                     )}
                   </button>
-                  <button className="p-0.5 rounded hover:bg-bg-hover text-text-muted">
-                    <Lock size={12} />
+                  <button className="p-0.5 rounded hover:bg-bg-hover text-text-muted/60 hover:text-text-muted">
+                    <Lock size={11} />
                   </button>
                 </div>
               </div>
             ))
           ) : (
-            // Default empty labels
             <>
               {['Video', 'Audio', 'Legendas'].map((label) => (
                 <div
@@ -303,7 +305,7 @@ export function Timeline() {
                   className="flex items-center px-2 border-b border-border-default/30"
                   style={{ height: 60 }}
                 >
-                  <span className="text-xs text-text-muted">{label}</span>
+                  <span className="text-[11px] text-text-muted">{label}</span>
                 </div>
               ))}
             </>

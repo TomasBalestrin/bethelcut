@@ -33,10 +33,10 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-bg-primary overflow-y-auto">
       {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border-default bg-bg-primary/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Logo size="md" />
-          <div className="flex items-center gap-4">
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border-default/60 bg-bg-primary/90 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+          <Logo size="sm" />
+          <div className="flex items-center gap-3">
             <Link
               href="/login"
               className="text-sm text-text-secondary hover:text-text-primary transition-colors"
@@ -45,40 +45,38 @@ export default function HomePage() {
             </Link>
             <Link
               href="/register"
-              className="text-sm px-4 py-2 bg-accent-primary hover:bg-blue-600 text-white rounded-lg font-medium transition-colors"
+              className="text-sm px-4 py-1.5 bg-accent-primary/10 text-accent-primary border border-accent-primary/20 rounded-md font-medium transition-colors hover:bg-accent-primary/15"
             >
-              Começar Grátis
+              Criar conta
             </Link>
           </div>
         </div>
       </nav>
 
       {/* Hero */}
-      <section className="pt-32 pb-20 px-6">
-        <div className="max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-primary/10 border border-accent-primary/20 text-accent-primary text-sm mb-6">
-            Editor de Vídeo Profissional com IA
-          </div>
-          <h1 className="text-5xl sm:text-6xl font-black tracking-tight mb-6">
-            Edite vídeos com{' '}
-            <span className="bg-gradient-to-r from-accent-primary to-accent-secondary bg-clip-text text-transparent">
-              inteligência artificial
-            </span>
+      <section className="pt-32 pb-24 px-6">
+        <div className="max-w-3xl mx-auto text-center">
+          <p className="text-xs uppercase tracking-[0.2em] text-text-muted mb-6 font-medium">
+            Editor de vídeo com inteligência artificial
+          </p>
+          <h1 className="text-4xl sm:text-5xl font-semibold tracking-tight mb-5 leading-[1.15] text-text-primary">
+            Edite vídeos de forma{' '}
+            <span className="text-accent-primary">inteligente</span>
           </h1>
-          <p className="text-xl text-text-secondary max-w-2xl mx-auto mb-10">
+          <p className="text-base text-text-secondary max-w-xl mx-auto mb-10 leading-relaxed">
             Corte silêncios, gere legendas, estilize e exporte para qualquer plataforma.
             Tudo no navegador, sem instalar nada.
           </p>
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-3">
             <Link
               href="/register"
-              className="px-8 py-3 bg-accent-primary hover:bg-blue-600 text-white rounded-xl font-semibold text-lg transition-colors shadow-lg shadow-accent-primary/25"
+              className="px-6 py-2.5 bg-accent-primary text-white rounded-md font-medium text-sm transition-colors hover:bg-accent-secondary"
             >
-              Começar Agora
+              Começar agora
             </Link>
             <Link
               href="/login"
-              className="px-8 py-3 bg-bg-surface hover:bg-bg-hover text-text-primary rounded-xl font-semibold text-lg transition-colors border border-border-default"
+              className="px-6 py-2.5 bg-bg-surface text-text-secondary rounded-md font-medium text-sm transition-colors border border-border-default hover:text-text-primary hover:border-border-active/40"
             >
               Já tenho conta
             </Link>
@@ -88,24 +86,27 @@ export default function HomePage() {
 
       {/* Features */}
       <section className="py-20 px-6">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-12">
+        <div className="max-w-5xl mx-auto">
+          <p className="text-xs uppercase tracking-[0.2em] text-text-muted text-center mb-3 font-medium">
+            Funcionalidades
+          </p>
+          <h2 className="text-2xl font-semibold text-center mb-14 text-text-primary">
             Tudo que você precisa para criar conteúdo profissional
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-border-default/60 rounded-lg overflow-hidden border border-border-default/60">
             {features.map((feature) => (
               <div
                 key={feature.title}
-                className="p-6 rounded-xl border border-border-default bg-bg-secondary hover:border-accent-primary/30 transition-colors group"
+                className="p-8 bg-bg-secondary"
               >
-                <div className="w-12 h-12 rounded-lg bg-accent-primary/10 flex items-center justify-center mb-4 group-hover:bg-accent-primary/20 transition-colors">
+                <div className="w-9 h-9 rounded-md bg-bg-surface flex items-center justify-center mb-4 border border-border-default/60">
                   <feature.icon
-                    size={24}
-                    className="text-accent-primary"
+                    size={18}
+                    className="text-text-secondary"
                   />
                 </div>
-                <h3 className="text-lg font-semibold mb-2">{feature.title}</h3>
-                <p className="text-text-secondary text-sm leading-relaxed">
+                <h3 className="text-sm font-medium mb-2 text-text-primary">{feature.title}</h3>
+                <p className="text-text-muted text-sm leading-relaxed">
                   {feature.description}
                 </p>
               </div>
@@ -115,7 +116,7 @@ export default function HomePage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border-default py-8 px-6">
+      <footer className="border-t border-border-default/60 py-8 px-6">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <Logo size="sm" />
           <p className="text-xs text-text-muted">

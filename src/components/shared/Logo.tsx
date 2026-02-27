@@ -13,11 +13,11 @@ export function Logo({ size = 'md', className }: LogoProps) {
   };
 
   return (
-    <div className={cn('flex items-center gap-2', className)}>
+    <div className={cn('flex items-center gap-1.5', className)}>
       <div className="relative">
         <div
           className={cn(
-            'font-black tracking-tight bg-gradient-to-r from-accent-primary to-accent-secondary bg-clip-text text-transparent',
+            'font-bold tracking-tight text-text-primary',
             sizeClasses[size]
           )}
         >
@@ -25,8 +25,8 @@ export function Logo({ size = 'md', className }: LogoProps) {
         </div>
         <span
           className={cn(
-            'font-light text-text-secondary',
-            size === 'sm' ? 'text-xs' : size === 'md' ? 'text-sm' : 'text-base'
+            'font-light text-text-muted tracking-widest uppercase',
+            size === 'sm' ? 'text-[9px]' : size === 'md' ? 'text-[10px]' : 'text-xs'
           )}
         >
           studio

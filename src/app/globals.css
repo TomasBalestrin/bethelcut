@@ -5,18 +5,18 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Montserrat:wght@400;700;900&family=Bebas+Neue&display=swap');
 
 :root {
-  --bg-primary: #1a1a2e;
-  --bg-secondary: #16213e;
-  --bg-tertiary: #0f3460;
-  --bg-timeline: #111827;
-  --bg-surface: #1e293b;
-  --bg-hover: #334155;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent-primary: #3b82f6;
-  --accent-secondary: #8b5cf6;
-  --border-default: #334155;
+  --bg-primary: #08090f;
+  --bg-secondary: #0d1017;
+  --bg-tertiary: #13161f;
+  --bg-timeline: #060810;
+  --bg-surface: #111420;
+  --bg-hover: #191d2a;
+  --text-primary: #dfe3ea;
+  --text-secondary: #7c8696;
+  --text-muted: #4a5264;
+  --accent-primary: #3f6fad;
+  --accent-secondary: #5283bf;
+  --border-default: #181d2a;
 }
 
 * {
@@ -40,12 +40,12 @@ body {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-secondary);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -59,7 +59,7 @@ body {
 
 /* Selection */
 ::selection {
-  background: rgba(59, 130, 246, 0.3);
+  background: rgba(63, 111, 173, 0.25);
   color: var(--text-primary);
 }
 
@@ -78,15 +78,15 @@ input[type="range"] {
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--accent-primary);
   cursor: pointer;
 }
 
 input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
+  height: 3px;
   border-radius: 2px;
   background: var(--border-default);
 }

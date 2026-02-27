@@ -25,9 +25,9 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-bg-primary overflow-y-auto">
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border-default bg-bg-primary/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Logo size="md" />
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border-default/60 bg-bg-primary/90 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+          <Logo size="sm" />
           <DashboardNav
             fullName={profile?.full_name ?? null}
             email={user.email || ''}

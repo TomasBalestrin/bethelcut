@@ -108,12 +108,12 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
         {/* New Project Card */}
         <button
           onClick={() => setShowNewModal(true)}
-          className="group flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border-default hover:border-accent-primary bg-bg-secondary/50 hover:bg-bg-secondary p-8 transition-all min-h-[200px]"
+          className="group flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-default/60 hover:border-accent-primary/30 bg-bg-secondary/30 hover:bg-bg-secondary p-8 transition-all min-h-[200px]"
         >
-          <div className="w-12 h-12 rounded-full bg-accent-primary/10 group-hover:bg-accent-primary/20 flex items-center justify-center transition-colors">
-            <Plus size={24} className="text-accent-primary" />
+          <div className="w-10 h-10 rounded-md bg-bg-surface flex items-center justify-center border border-border-default/60 group-hover:border-accent-primary/20 transition-colors">
+            <Plus size={20} className="text-text-muted group-hover:text-accent-primary transition-colors" />
           </div>
-          <span className="text-sm font-medium text-text-secondary group-hover:text-text-primary transition-colors">
+          <span className="text-sm text-text-muted group-hover:text-text-secondary transition-colors">
             Novo Projeto
           </span>
         </button>
@@ -122,12 +122,12 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
         {projects.map((project) => (
           <div
             key={project.id}
-            className="group relative flex flex-col rounded-xl border border-border-default bg-bg-secondary hover:border-border-active transition-colors overflow-hidden"
+            className="group relative flex flex-col rounded-lg border border-border-default/60 bg-bg-secondary hover:border-border-default transition-colors overflow-hidden"
           >
             {/* Thumbnail */}
             <button
               onClick={() => router.push(`/editor/${project.id}`)}
-              className="relative aspect-video bg-bg-tertiary flex items-center justify-center"
+              className="relative aspect-video bg-bg-primary flex items-center justify-center"
             >
               {project.thumbnail_url ? (
                 <img
@@ -136,9 +136,9 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <Video size={32} className="text-text-muted" />
+                <Video size={28} className="text-text-muted/40" />
               )}
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
             </button>
 
             {/* Info */}
@@ -154,22 +154,22 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
                   <input
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="flex-1 bg-bg-surface rounded px-2 py-1 text-sm border border-border-default focus:border-accent-primary"
+                    className="flex-1 bg-bg-primary/50 rounded-md px-2 py-1 text-sm border border-border-default/60 focus:border-accent-primary/40 text-text-primary"
                     autoFocus
                     onBlur={() => setEditingId(null)}
                   />
                 </form>
               ) : (
-                <h3 className="text-sm font-medium truncate">
+                <h3 className="text-sm font-medium truncate text-text-primary">
                   {project.name}
                 </h3>
               )}
-              <div className="flex items-center gap-1 mt-1 text-xs text-text-muted">
-                <Clock size={12} />
+              <div className="flex items-center gap-1 mt-1.5 text-xs text-text-muted">
+                <Clock size={11} />
                 {formatDate(project.updated_at)}
               </div>
               <div className="flex items-center justify-between mt-2">
-                <span className="text-xs px-2 py-0.5 rounded-full bg-bg-surface text-text-secondary">
+                <span className="text-[10px] px-2 py-0.5 rounded-md bg-bg-surface text-text-muted border border-border-default/40">
                   {project.aspect_ratio}
                 </span>
 
@@ -182,9 +182,9 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
                         menuOpenId === project.id ? null : project.id
                       );
                     }}
-                    className="p-1 rounded hover:bg-bg-hover transition-colors text-text-muted hover:text-text-primary"
+                    className="p-1 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
                   >
-                    <MoreVertical size={16} />
+                    <MoreVertical size={14} />
                   </button>
 
                   {menuOpenId === project.id && (
@@ -193,23 +193,23 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
                         className="fixed inset-0 z-40"
                         onClick={() => setMenuOpenId(null)}
                       />
-                      <div className="absolute right-0 bottom-full mb-1 w-40 rounded-lg border border-border-default bg-bg-secondary shadow-xl z-50">
+                      <div className="absolute right-0 bottom-full mb-1 w-36 rounded-md border border-border-default/60 bg-bg-secondary z-50">
                         <button
                           onClick={() => {
                             setEditingId(project.id);
                             setEditName(project.name);
                             setMenuOpenId(null);
                           }}
-                          className="w-full flex items-center gap-2 rounded-t-lg px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+                          className="w-full flex items-center gap-2 rounded-t-md px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
                         >
-                          <Pencil size={14} />
+                          <Pencil size={13} />
                           Renomear
                         </button>
                         <button
                           onClick={() => deleteProject(project.id)}
-                          className="w-full flex items-center gap-2 rounded-b-lg px-3 py-2 text-sm text-accent-danger hover:bg-bg-hover"
+                          className="w-full flex items-center gap-2 rounded-b-md px-3 py-2 text-sm text-accent-danger hover:bg-bg-hover transition-colors"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                           Excluir
                         </button>
                       </div>
