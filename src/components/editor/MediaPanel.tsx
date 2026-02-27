@@ -20,6 +20,26 @@ import { createClient } from '@/lib/supabase/client';
 import { formatFileSize, formatDuration } from '@/lib/utils';
 import type { MediaAsset } from '@/types/project';
 
+function getMediaDuration(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    const el = document.createElement(
+      file.type.startsWith('audio/') ? 'audio' : 'video'
+    );
+    el.preload = 'metadata';
+    const url = URL.createObjectURL(file);
+    el.onloadedmetadata = () => {
+      const ms = Math.round(el.duration * 1000);
+      URL.revokeObjectURL(url);
+      resolve(ms > 0 && Number.isFinite(ms) ? ms : 30000);
+    };
+    el.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(30000);
+    };
+    el.src = url;
+  });
+}
+
 type TabId = 'media' | 'captions' | 'silence' | 'effects';
 
 const tabs: { id: TabId; label: string; icon: typeof Video }[] = [
@@ -164,6 +184,19 @@ export function MediaPanel() {
 
       setUploadProgress(100);
 
+      // Extract real duration from local file
+      let fileDurationMs: number | null = null;
+      if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+        fileDurationMs = await getMediaDuration(file);
+        // Update the media_asset record with real duration
+        if (fileDurationMs && asset) {
+          await supabase
+            .from('media_assets')
+            .update({ duration_ms: fileDurationMs })
+            .eq('id', asset.id);
+        }
+      }
+
       if (asset) {
         const newAsset: MediaAsset = {
           id: asset.id,
@@ -174,7 +207,7 @@ export function MediaPanel() {
           fileUrl: asset.file_url,
           fileSizeBytes: asset.file_size_bytes,
           mimeType: asset.mime_type,
-          durationMs: asset.duration_ms,
+          durationMs: fileDurationMs || asset.duration_ms,
           width: asset.width,
           height: asset.height,
           fps: asset.fps,
