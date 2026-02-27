@@ -228,6 +228,7 @@ export function PreviewPlayer() {
                 key={videoAsset.id}
                 ref={videoRef}
                 src={videoAsset.fileUrl}
+                crossOrigin="anonymous"
                 preload="auto"
                 className="w-full h-full object-contain"
                 onTimeUpdate={handleTimeUpdate}
