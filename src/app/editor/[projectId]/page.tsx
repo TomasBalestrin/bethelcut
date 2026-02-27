@@ -143,6 +143,43 @@ export default function EditorPage() {
                 })),
             }))
           );
+        } else {
+          // Auto-create default tracks if none exist
+          const defaultTracks = [
+            { type: 'video', label: 'Video', order_index: 0 },
+            { type: 'audio', label: 'Audio', order_index: 1 },
+            { type: 'caption', label: 'Legendas', order_index: 2 },
+          ];
+
+          const { data: newTracks } = await supabase
+            .from('timeline_tracks')
+            .insert(
+              defaultTracks.map((t) => ({
+                project_id: projectId,
+                type: t.type,
+                label: t.label,
+                order_index: t.order_index,
+                height: 60,
+              }))
+            )
+            .select();
+
+          if (newTracks && newTracks.length > 0) {
+            setTracks(
+              (newTracks as any[]).map((t) => ({
+                id: t.id,
+                projectId: t.project_id,
+                type: t.type,
+                label: t.label || t.type,
+                orderIndex: t.order_index,
+                isLocked: t.is_locked,
+                isMuted: t.is_muted,
+                isHidden: t.is_hidden,
+                height: t.height,
+                clips: [],
+              }))
+            );
+          }
         }
 
         setIsLoading(false);
