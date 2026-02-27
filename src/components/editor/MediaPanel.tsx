@@ -11,11 +11,14 @@ import {
   Sparkles,
   FileVideo,
   Trash2,
+  Plus,
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useProjectStore } from '@/stores/useProjectStore';
+import { useTimelineStore } from '@/stores/useTimelineStore';
 import { createClient } from '@/lib/supabase/client';
 import { formatFileSize, formatDuration } from '@/lib/utils';
+import type { MediaAsset } from '@/types/project';
 
 type TabId = 'media' | 'captions' | 'silence' | 'effects';
 
@@ -33,10 +36,78 @@ export function MediaPanel() {
   const addMediaAsset = useProjectStore((s) => s.addMediaAsset);
   const removeMediaAsset = useProjectStore((s) => s.removeMediaAsset);
   const currentProject = useProjectStore((s) => s.currentProject);
+  const tracks = useTimelineStore((s) => s.tracks);
+  const addClip = useTimelineStore((s) => s.addClip);
+  const setDurationMs = useEditorStore((s) => s.setDurationMs);
+  const durationMs = useEditorStore((s) => s.durationMs);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
+
+  const addAssetToTimeline = async (asset: MediaAsset) => {
+    // Find the right track based on asset type
+    const trackType = asset.type === 'audio' ? 'audio' : 'video';
+    const track = tracks.find((t) => t.type === trackType);
+    if (!track) return;
+
+    // Calculate start position (end of last clip on track, or 0)
+    const lastClip = track.clips.length > 0
+      ? track.clips.reduce((max, c) => c.endTimeMs > max.endTimeMs ? c : max, track.clips[0])
+      : null;
+    const startTimeMs = lastClip ? lastClip.endTimeMs : 0;
+
+    // Use asset duration or default to 30s
+    const clipDuration = asset.durationMs || 30000;
+    const endTimeMs = startTimeMs + clipDuration;
+
+    // Persist clip to database
+    const { data: clipData, error } = await supabase
+      .from('timeline_clips')
+      .insert({
+        track_id: track.id,
+        asset_id: asset.id,
+        clip_type: trackType,
+        start_time_ms: startTimeMs,
+        end_time_ms: endTimeMs,
+        source_in_ms: 0,
+        source_out_ms: clipDuration,
+        properties: {},
+        order_index: track.clips.length,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding clip to timeline:', error);
+      return;
+    }
+
+    if (clipData) {
+      // Add clip to timeline store
+      addClip(track.id, {
+        id: clipData.id,
+        trackId: track.id,
+        assetId: asset.id,
+        clipType: trackType,
+        startTimeMs,
+        endTimeMs,
+        sourceInMs: 0,
+        sourceOutMs: clipDuration,
+        properties: {},
+        orderIndex: track.clips.length,
+      });
+
+      // Update project duration if needed
+      if (endTimeMs > durationMs) {
+        setDurationMs(endTimeMs);
+        await supabase
+          .from('projects')
+          .update({ duration_ms: endTimeMs })
+          .eq('id', asset.projectId);
+      }
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -94,7 +165,7 @@ export function MediaPanel() {
       setUploadProgress(100);
 
       if (asset) {
-        addMediaAsset({
+        const newAsset: MediaAsset = {
           id: asset.id,
           projectId: asset.project_id,
           userId: asset.user_id,
@@ -110,7 +181,11 @@ export function MediaPanel() {
           waveformData: null,
           thumbnailUrl: asset.thumbnail_url,
           createdAt: asset.created_at,
-        });
+        };
+        addMediaAsset(newAsset);
+
+        // Auto-add to timeline after upload
+        await addAssetToTimeline(newAsset);
       }
     } catch (err) {
       console.error('Upload error:', err);
@@ -210,7 +285,9 @@ export function MediaPanel() {
                 return (
                   <div
                     key={asset.id}
+                    onClick={() => addAssetToTimeline(asset)}
                     className="group flex items-center gap-2.5 p-2 rounded-md hover:bg-bg-hover transition-colors cursor-pointer"
+                    title="Clique para adicionar à timeline"
                   >
                     <div className="w-9 h-9 rounded-md bg-bg-surface flex items-center justify-center flex-shrink-0 border border-border-default/40">
                       {asset.thumbnailUrl ? (
@@ -236,6 +313,16 @@ export function MediaPanel() {
                           : ''}
                       </p>
                     </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        addAssetToTimeline(asset);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-accent-primary/10 text-text-muted hover:text-accent-primary transition-all"
+                      title="Adicionar à timeline"
+                    >
+                      <Plus size={13} />
+                    </button>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
