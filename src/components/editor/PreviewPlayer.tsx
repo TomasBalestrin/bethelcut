@@ -12,12 +12,15 @@ import {
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useProjectStore } from '@/stores/useProjectStore';
+import { useTimelineStore } from '@/stores/useTimelineStore';
+import { createClient } from '@/lib/supabase/client';
 import { ASPECT_RATIOS } from '@/lib/constants';
 import { formatDuration } from '@/lib/utils';
 
 export function PreviewPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
   const isPlaying = useEditorStore((s) => s.isPlaying);
   const setIsPlaying = useEditorStore((s) => s.setIsPlaying);
   const currentTimeMs = useEditorStore((s) => s.currentTimeMs);
@@ -29,13 +32,33 @@ export function PreviewPlayer() {
   const isMuted = useEditorStore((s) => s.isMuted);
   const toggleMute = useEditorStore((s) => s.toggleMute);
   const aspectRatio = useEditorStore((s) => s.aspectRatio);
-  const mediaAssets = useProjectStore((s) => s.mediaAssets);
-  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
 
-  const videoAsset = mediaAssets.find((a) => a.type === 'video');
+  const mediaAssets = useProjectStore((s) => s.mediaAssets);
+  const currentProject = useProjectStore((s) => s.currentProject);
+
+  const tracks = useTimelineStore((s) => s.tracks);
+  const updateClip = useTimelineStore((s) => s.updateClip);
+
+  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const supabase = createClient();
+
+  // Find the video track and active clip from the timeline
+  const videoTrack = tracks.find((t) => t.type === 'video');
+  const activeClip = videoTrack?.clips.find(
+    (c) => currentTimeMs >= c.startTimeMs && currentTimeMs < c.endTimeMs
+  );
+  const fallbackClip = videoTrack?.clips[0];
+  const currentClip = activeClip || fallbackClip;
+
+  // Get the media asset for the active clip
+  const videoAsset = currentClip?.assetId
+    ? mediaAssets.find((a) => a.id === currentClip.assetId)
+    : mediaAssets.find((a) => a.type === 'video');
+
   const ratioConfig = ASPECT_RATIOS[aspectRatio];
   const aspectRatioValue = ratioConfig.width / ratioConfig.height;
 
+  // Play/Pause sync
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -47,6 +70,7 @@ export function PreviewPlayer() {
     }
   }, [isPlaying, setIsPlaying]);
 
+  // Volume sync
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -54,25 +78,87 @@ export function PreviewPlayer() {
     video.muted = isMuted;
   }, [volume, isMuted]);
 
+  // Bidirectional sync: when currentTimeMs changes externally (timeline click), seek video
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.duration)) return;
+
+    const videoTimeMs = Math.round(video.currentTime * 1000);
+    // Only seek if the difference is significant (= external change, not from timeupdate)
+    if (Math.abs(currentTimeMs - videoTimeMs) > 250) {
+      video.currentTime = Math.max(
+        0,
+        Math.min(video.duration, currentTimeMs / 1000)
+      );
+    }
+  }, [currentTimeMs]);
+
+  // Video drives currentTimeMs while playing
   const handleTimeUpdate = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     setCurrentTimeMs(Math.round(video.currentTime * 1000));
   }, [setCurrentTimeMs]);
 
+  // When video metadata loads, fix duration and clip if needed
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    setDurationMs(Math.round(video.duration * 1000));
-  }, [setDurationMs]);
+
+    const realDurationMs = Math.round(video.duration * 1000);
+    if (realDurationMs <= 0 || !Number.isFinite(realDurationMs)) return;
+
+    // Update project duration
+    setDurationMs(realDurationMs);
+
+    // Fix clip duration if it was created with a default (30s)
+    if (currentClip && videoTrack) {
+      const clipDuration = currentClip.endTimeMs - currentClip.startTimeMs;
+      if (Math.abs(clipDuration - realDurationMs) > 500) {
+        const newEndTime = currentClip.startTimeMs + realDurationMs;
+
+        // Update clip in store
+        updateClip(videoTrack.id, currentClip.id, {
+          endTimeMs: newEndTime,
+          sourceOutMs: realDurationMs,
+        });
+
+        // Persist clip update to DB
+        supabase
+          .from('timeline_clips')
+          .update({
+            end_time_ms: newEndTime,
+            source_out_ms: realDurationMs,
+          })
+          .eq('id', currentClip.id);
+
+        // Update media asset duration in DB
+        if (currentClip.assetId) {
+          supabase
+            .from('media_assets')
+            .update({ duration_ms: realDurationMs })
+            .eq('id', currentClip.assetId);
+        }
+
+        // Update project duration in DB
+        if (currentProject) {
+          supabase
+            .from('projects')
+            .update({ duration_ms: newEndTime })
+            .eq('id', currentProject.id);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setDurationMs, currentClip?.id, videoTrack?.id, currentProject?.id]);
 
   const handleSeek = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const video = videoRef.current;
       if (!video) return;
-      const time = Number(e.target.value) / 1000;
-      video.currentTime = time;
-      setCurrentTimeMs(Number(e.target.value));
+      const timeMs = Number(e.target.value);
+      video.currentTime = timeMs / 1000;
+      setCurrentTimeMs(timeMs);
     },
     [setCurrentTimeMs]
   );

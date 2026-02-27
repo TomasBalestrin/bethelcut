@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '@/stores/useEditorStore';
+import { useProjectStore } from '@/stores/useProjectStore';
 import { useTimelineStore } from '@/stores/useTimelineStore';
 import { THEME } from '@/lib/constants';
 import { formatDuration, msToTimelinePixels } from '@/lib/utils';
@@ -20,6 +21,7 @@ export function Timeline() {
   const durationMs = useEditorStore((s) => s.durationMs);
   const zoom = useEditorStore((s) => s.zoom);
 
+  const mediaAssets = useProjectStore((s) => s.mediaAssets);
   const tracks = useTimelineStore((s) => s.tracks);
   const pixelsPerSecond = useTimelineStore((s) => s.pixelsPerSecond);
   const scrollX = useTimelineStore((s) => s.scrollX);
@@ -157,6 +159,23 @@ export function Timeline() {
         // Clip top accent line
         ctx.fillStyle = clipColor + '80';
         ctx.fillRect(clipX, clipY, clipWidth, 1);
+
+        // Clip label (asset filename)
+        if (clipWidth > 40) {
+          const asset = clip.assetId
+            ? mediaAssets.find((a) => a.id === clip.assetId)
+            : null;
+          const label = asset?.fileName || clip.clipType;
+          ctx.fillStyle = THEME.text.secondary;
+          ctx.font = '9px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(clipX + 4, clipY, clipWidth - 8, clipH);
+          ctx.clip();
+          ctx.fillText(label, clipX + 6, clipY + clipH / 2 + 3);
+          ctx.restore();
+        }
       }
 
       trackY += trackHeight;
@@ -208,6 +227,7 @@ export function Timeline() {
     currentTimeMs,
     tracks,
     effectivePps,
+    mediaAssets,
   ]);
 
   // Animation loop
