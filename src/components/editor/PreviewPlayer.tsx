@@ -9,6 +9,8 @@ import {
   Maximize,
   SkipBack,
   SkipForward,
+  AlertCircle,
+  Loader2,
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useProjectStore } from '@/stores/useProjectStore';
@@ -40,23 +42,27 @@ export function PreviewPlayer() {
   const updateClip = useTimelineStore((s) => s.updateClip);
 
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  const [videoReady, setVideoReady] = useState(false);
+  const [videoError, setVideoError] = useState(false);
   const supabase = createClient();
 
-  // Find the video track and active clip from the timeline
+  // Find video asset: try from timeline clip first, then fall back to direct asset
   const videoTrack = tracks.find((t) => t.type === 'video');
-  const activeClip = videoTrack?.clips.find(
-    (c) => currentTimeMs >= c.startTimeMs && currentTimeMs < c.endTimeMs
-  );
-  const fallbackClip = videoTrack?.clips[0];
-  const currentClip = activeClip || fallbackClip;
-
-  // Get the media asset for the active clip
-  const videoAsset = currentClip?.assetId
-    ? mediaAssets.find((a) => a.id === currentClip.assetId)
-    : mediaAssets.find((a) => a.type === 'video');
+  const firstVideoClip = videoTrack?.clips[0];
+  const clipAsset = firstVideoClip?.assetId
+    ? mediaAssets.find((a) => a.id === firstVideoClip.assetId)
+    : null;
+  const directAsset = mediaAssets.find((a) => a.type === 'video');
+  const videoAsset = clipAsset || directAsset;
 
   const ratioConfig = ASPECT_RATIOS[aspectRatio];
   const aspectRatioValue = ratioConfig.width / ratioConfig.height;
+
+  // Reset video states when asset changes
+  useEffect(() => {
+    setVideoReady(false);
+    setVideoError(false);
+  }, [videoAsset?.id]);
 
   // Play/Pause sync
   useEffect(() => {
@@ -81,15 +87,17 @@ export function PreviewPlayer() {
   // Bidirectional sync: when currentTimeMs changes externally (timeline click), seek video
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
+    if (!video) return;
 
     const videoTimeMs = Math.round(video.currentTime * 1000);
     // Only seek if the difference is significant (= external change, not from timeupdate)
     if (Math.abs(currentTimeMs - videoTimeMs) > 250) {
-      video.currentTime = Math.max(
-        0,
-        Math.min(video.duration, currentTimeMs / 1000)
-      );
+      const targetSec = currentTimeMs / 1000;
+      if (Number.isFinite(video.duration)) {
+        video.currentTime = Math.max(0, Math.min(video.duration, targetSec));
+      } else {
+        video.currentTime = Math.max(0, targetSec);
+      }
     }
   }, [currentTimeMs]);
 
@@ -99,6 +107,11 @@ export function PreviewPlayer() {
     if (!video) return;
     setCurrentTimeMs(Math.round(video.currentTime * 1000));
   }, [setCurrentTimeMs]);
+
+  // When video data is loaded enough to display a frame
+  const handleCanPlay = useCallback(() => {
+    setVideoReady(true);
+  }, []);
 
   // When video metadata loads, fix duration and clip if needed
   const handleLoadedMetadata = useCallback(() => {
@@ -112,35 +125,33 @@ export function PreviewPlayer() {
     setDurationMs(realDurationMs);
 
     // Fix clip duration if it was created with a default (30s)
-    if (currentClip && videoTrack) {
-      const clipDuration = currentClip.endTimeMs - currentClip.startTimeMs;
+    if (firstVideoClip && videoTrack) {
+      const clipDuration = firstVideoClip.endTimeMs - firstVideoClip.startTimeMs;
       if (Math.abs(clipDuration - realDurationMs) > 500) {
-        const newEndTime = currentClip.startTimeMs + realDurationMs;
+        const newEndTime = firstVideoClip.startTimeMs + realDurationMs;
 
         // Update clip in store
-        updateClip(videoTrack.id, currentClip.id, {
+        updateClip(videoTrack.id, firstVideoClip.id, {
           endTimeMs: newEndTime,
           sourceOutMs: realDurationMs,
         });
 
-        // Persist clip update to DB
+        // Persist to DB
         supabase
           .from('timeline_clips')
           .update({
             end_time_ms: newEndTime,
             source_out_ms: realDurationMs,
           })
-          .eq('id', currentClip.id);
+          .eq('id', firstVideoClip.id);
 
-        // Update media asset duration in DB
-        if (currentClip.assetId) {
+        if (firstVideoClip.assetId) {
           supabase
             .from('media_assets')
             .update({ duration_ms: realDurationMs })
-            .eq('id', currentClip.assetId);
+            .eq('id', firstVideoClip.assetId);
         }
 
-        // Update project duration in DB
         if (currentProject) {
           supabase
             .from('projects')
@@ -150,7 +161,12 @@ export function PreviewPlayer() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setDurationMs, currentClip?.id, videoTrack?.id, currentProject?.id]);
+  }, [setDurationMs, firstVideoClip?.id, videoTrack?.id, currentProject?.id]);
+
+  const handleError = useCallback(() => {
+    setVideoError(true);
+    setVideoReady(false);
+  }, []);
 
   const handleSeek = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,7 +186,7 @@ export function PreviewPlayer() {
   const skipForward = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = Math.min(video.duration, video.currentTime + 5);
+    video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
   }, []);
 
   const skipBackward = useCallback(() => {
@@ -207,15 +223,50 @@ export function PreviewPlayer() {
           }}
         >
           {videoAsset ? (
-            <video
-              ref={videoRef}
-              src={videoAsset.fileUrl}
-              className="w-full h-full object-contain"
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleLoadedMetadata}
-              onEnded={handleEnded}
-              playsInline
-            />
+            <>
+              <video
+                key={videoAsset.id}
+                ref={videoRef}
+                src={videoAsset.fileUrl}
+                preload="auto"
+                className="w-full h-full object-contain"
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleLoadedMetadata}
+                onCanPlay={handleCanPlay}
+                onEnded={handleEnded}
+                onError={handleError}
+                playsInline
+              />
+
+              {/* Loading overlay */}
+              {!videoReady && !videoError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80">
+                  <Loader2
+                    size={32}
+                    className="text-accent-primary animate-spin mb-2"
+                  />
+                  <p className="text-xs text-text-muted">
+                    Carregando vídeo...
+                  </p>
+                </div>
+              )}
+
+              {/* Error overlay */}
+              {videoError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80">
+                  <AlertCircle
+                    size={32}
+                    className="text-accent-danger mb-2"
+                  />
+                  <p className="text-xs text-text-muted">
+                    Erro ao carregar o vídeo
+                  </p>
+                  <p className="text-[10px] text-text-muted/60 mt-1 max-w-xs text-center truncate px-4">
+                    {videoAsset.fileUrl}
+                  </p>
+                </div>
+              )}
+            </>
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-text-muted">
               <Play size={40} className="mb-3 opacity-20" />
