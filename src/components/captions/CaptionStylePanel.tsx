@@ -34,7 +34,7 @@ export function CaptionStylePanel() {
                 });
                 applyGlobalStyle();
               }}
-              className="p-3 rounded-lg border border-border-default hover:border-accent-primary bg-bg-surface transition-colors text-left"
+              className="p-3 rounded-md border border-border-default/60 hover:border-accent-primary/30 bg-bg-surface transition-colors text-left"
             >
               <span
                 className="block text-sm font-bold"
@@ -66,7 +66,7 @@ export function CaptionStylePanel() {
         <select
           value={globalStyle.fontFamily}
           onChange={(e) => setGlobalStyle({ fontFamily: e.target.value })}
-          className="w-full bg-bg-surface border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary"
+          className="w-full bg-bg-surface border border-border-default/60 rounded-md px-3 py-1.5 text-sm text-text-primary"
         >
           <option value="Inter">Inter</option>
           <option value="Montserrat">Montserrat</option>
@@ -105,7 +105,7 @@ export function CaptionStylePanel() {
               type="color"
               value={globalStyle.color}
               onChange={(e) => setGlobalStyle({ color: e.target.value })}
-              className="w-8 h-8 rounded border border-border-default cursor-pointer"
+              className="w-8 h-8 rounded border border-border-default/60 cursor-pointer"
             />
             <span className="text-xs font-mono text-text-muted">
               {globalStyle.color}
@@ -123,7 +123,7 @@ export function CaptionStylePanel() {
               onChange={(e) =>
                 setGlobalStyle({ highlightColor: e.target.value })
               }
-              className="w-8 h-8 rounded border border-border-default cursor-pointer"
+              className="w-8 h-8 rounded border border-border-default/60 cursor-pointer"
             />
             <span className="text-xs font-mono text-text-muted">
               {globalStyle.highlightColor}
@@ -144,7 +144,7 @@ export function CaptionStylePanel() {
               animation: e.target.value as typeof globalStyle.animation,
             })
           }
-          className="w-full bg-bg-surface border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary"
+          className="w-full bg-bg-surface border border-border-default/60 rounded-md px-3 py-1.5 text-sm text-text-primary"
         >
           <option value="none">Nenhuma</option>
           <option value="fade">Fade In</option>
@@ -158,7 +158,7 @@ export function CaptionStylePanel() {
       {/* Apply Button */}
       <button
         onClick={applyGlobalStyle}
-        className="w-full py-2 rounded-lg bg-accent-primary hover:bg-blue-600 text-white text-sm font-medium transition-colors"
+        className="w-full py-2 rounded-md bg-accent-primary hover:bg-accent-secondary text-white text-sm font-medium transition-colors"
       >
         Aplicar em todas as legendas
       </button>

@@ -36,7 +36,6 @@ export function PreviewPlayer() {
   const ratioConfig = ASPECT_RATIOS[aspectRatio];
   const aspectRatioValue = ratioConfig.width / ratioConfig.height;
 
-  // Sync playback state
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -48,7 +47,6 @@ export function PreviewPlayer() {
     }
   }, [isPlaying, setIsPlaying]);
 
-  // Sync volume
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -113,7 +111,7 @@ export function PreviewPlayer() {
         className="relative flex-1 w-full flex items-center justify-center min-h-0"
       >
         <div
-          className="relative bg-black rounded-lg overflow-hidden shadow-2xl"
+          className="relative bg-black rounded-md overflow-hidden"
           style={{
             aspectRatio: aspectRatioValue,
             maxWidth: '100%',
@@ -134,8 +132,8 @@ export function PreviewPlayer() {
             />
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-text-muted">
-              <Play size={48} className="mb-3 opacity-30" />
-              <p className="text-sm">Importe um vídeo para começar</p>
+              <Play size={40} className="mb-3 opacity-20" />
+              <p className="text-xs">Importe um vídeo para começar</p>
             </div>
           )}
         </div>
@@ -145,7 +143,7 @@ export function PreviewPlayer() {
       <div className="w-full max-w-2xl flex flex-col gap-2">
         {/* Progress Bar */}
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-text-muted w-16 text-right font-mono">
+          <span className="text-[10px] text-text-muted w-14 text-right font-mono">
             {formatDuration(currentTimeMs)}
           </span>
           <input
@@ -156,7 +154,7 @@ export function PreviewPlayer() {
             onChange={handleSeek}
             className="flex-1 h-1 cursor-pointer"
           />
-          <span className="text-[10px] text-text-muted w-16 font-mono">
+          <span className="text-[10px] text-text-muted w-14 font-mono">
             {formatDuration(durationMs)}
           </span>
         </div>
@@ -165,28 +163,28 @@ export function PreviewPlayer() {
         <div className="flex items-center justify-center gap-2">
           <button
             onClick={skipBackward}
-            className="p-1.5 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+            className="p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
             title="-5s"
           >
-            <SkipBack size={16} />
+            <SkipBack size={14} />
           </button>
 
           <button
             onClick={() => setIsPlaying(!isPlaying)}
-            className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-text-primary"
+            className="p-2.5 rounded-full bg-bg-surface hover:bg-bg-hover transition-colors text-text-primary border border-border-default/60"
           >
-            {isPlaying ? <Pause size={20} /> : <Play size={20} />}
+            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
           </button>
 
           <button
             onClick={skipForward}
-            className="p-1.5 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+            className="p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
             title="+5s"
           >
-            <SkipForward size={16} />
+            <SkipForward size={14} />
           </button>
 
-          <div className="w-px h-5 bg-border-default mx-2" />
+          <div className="w-px h-4 bg-border-default/60 mx-2" />
 
           {/* Volume */}
           <div
@@ -196,12 +194,12 @@ export function PreviewPlayer() {
           >
             <button
               onClick={toggleMute}
-              className="p-1.5 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+              className="p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
             >
               {isMuted || volume === 0 ? (
-                <VolumeX size={16} />
+                <VolumeX size={14} />
               ) : (
-                <Volume2 size={16} />
+                <Volume2 size={14} />
               )}
             </button>
             {showVolumeSlider && (
@@ -215,17 +213,17 @@ export function PreviewPlayer() {
                   setVolume(Number(e.target.value));
                   if (isMuted) toggleMute();
                 }}
-                className="w-20 ml-1"
+                className="w-16 ml-1"
               />
             )}
           </div>
 
           <button
             onClick={toggleFullscreen}
-            className="p-1.5 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary ml-auto"
+            className="p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary ml-auto"
             title="Tela cheia"
           >
-            <Maximize size={16} />
+            <Maximize size={14} />
           </button>
         </div>
       </div>

@@ -11,8 +11,8 @@ export function PropertiesPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-3 border-b border-border-default">
-        <h3 className="text-sm font-semibold">Propriedades</h3>
+      <div className="p-3 border-b border-border-default/60">
+        <h3 className="text-xs font-medium text-text-secondary">Propriedades</h3>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
@@ -31,26 +31,24 @@ function ProjectProperties({ aspectRatio }: { aspectRatio: AspectRatioKey }) {
 
   return (
     <div className="space-y-4">
-      {/* Aspect Ratio */}
       <div>
-        <label className="flex items-center gap-2 text-xs font-medium text-text-secondary mb-2">
-          <Monitor size={14} />
+        <label className="flex items-center gap-2 text-[10px] font-medium text-text-muted mb-2 uppercase tracking-wider">
+          <Monitor size={12} />
           Proporção de Tela
         </label>
         <AspectRatioSelector />
       </div>
 
-      {/* Current Resolution */}
-      <div className="p-3 rounded-lg bg-bg-surface">
-        <p className="text-xs text-text-muted mb-1">Resolução</p>
-        <p className="text-sm font-mono">
+      <div className="p-3 rounded-md bg-bg-surface border border-border-default/40">
+        <p className="text-[10px] text-text-muted mb-1">Resolução</p>
+        <p className="text-xs font-mono text-text-secondary">
           {ratioConfig.width} x {ratioConfig.height}
         </p>
       </div>
 
-      <div className="p-3 rounded-lg bg-bg-surface">
-        <p className="text-xs text-text-muted mb-1">Plataforma</p>
-        <p className="text-sm">{ratioConfig.label}</p>
+      <div className="p-3 rounded-md bg-bg-surface border border-border-default/40">
+        <p className="text-[10px] text-text-muted mb-1">Plataforma</p>
+        <p className="text-xs text-text-secondary">{ratioConfig.label}</p>
       </div>
     </div>
   );
@@ -59,18 +57,18 @@ function ProjectProperties({ aspectRatio }: { aspectRatio: AspectRatioKey }) {
 function ClipProperties({ clipId }: { clipId: string }) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2 text-xs font-medium text-text-secondary">
-        <Sliders size={14} />
+      <div className="flex items-center gap-2 text-[10px] font-medium text-text-muted uppercase tracking-wider">
+        <Sliders size={12} />
         Clip selecionado
       </div>
-      <div className="p-3 rounded-lg bg-bg-surface">
-        <p className="text-xs text-text-muted mb-1">ID</p>
-        <p className="text-xs font-mono truncate">{clipId}</p>
+      <div className="p-3 rounded-md bg-bg-surface border border-border-default/40">
+        <p className="text-[10px] text-text-muted mb-1">ID</p>
+        <p className="text-[10px] font-mono truncate text-text-secondary">{clipId}</p>
       </div>
 
       <div>
-        <label className="text-xs font-medium text-text-secondary mb-2 flex items-center gap-2">
-          <Type size={14} />
+        <label className="text-[10px] font-medium text-text-muted mb-2 flex items-center gap-2 uppercase tracking-wider">
+          <Type size={12} />
           Velocidade
         </label>
         <input
@@ -89,7 +87,7 @@ function ClipProperties({ clipId }: { clipId: string }) {
       </div>
 
       <div>
-        <label className="text-xs font-medium text-text-secondary mb-2 block">
+        <label className="text-[10px] font-medium text-text-muted mb-2 block uppercase tracking-wider">
           Volume
         </label>
         <input

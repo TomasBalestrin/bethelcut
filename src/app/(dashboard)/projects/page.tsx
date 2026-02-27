@@ -20,8 +20,8 @@ export default async function ProjectsPage() {
     <div>
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold">Meus Projetos</h1>
-          <p className="text-text-secondary text-sm mt-1">
+          <h1 className="text-xl font-medium text-text-primary">Meus Projetos</h1>
+          <p className="text-text-muted text-sm mt-1">
             Gerencie seus projetos de edição de vídeo
           </p>
         </div>

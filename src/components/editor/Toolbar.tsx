@@ -50,25 +50,25 @@ export function Toolbar() {
 
   return (
     <div
-      className="flex items-center justify-between px-3 border-b border-border-default bg-bg-secondary flex-shrink-0"
+      className="flex items-center justify-between px-3 border-b border-border-default/60 bg-bg-secondary flex-shrink-0"
       style={{ height: EDITOR_CONFIG.TOOLBAR_HEIGHT }}
     >
       {/* Left: Back + Logo + Project Name */}
       <div className="flex items-center gap-3">
         <button
           onClick={() => router.push('/projects')}
-          className="p-1.5 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+          className="p-1.5 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
           title="Voltar aos projetos"
         >
-          <ArrowLeft size={18} />
+          <ArrowLeft size={16} />
         </button>
         <Logo size="sm" />
-        <div className="h-5 w-px bg-border-default" />
-        <span className="text-sm text-text-secondary truncate max-w-[200px]">
+        <div className="h-4 w-px bg-border-default/60" />
+        <span className="text-xs text-text-muted truncate max-w-[200px]">
           {currentProject?.name || 'Projeto'}
         </span>
         {isSaving && (
-          <span className="text-xs text-text-muted animate-pulse">
+          <span className="text-[10px] text-text-muted animate-pulse">
             Salvando...
           </span>
         )}
@@ -78,53 +78,53 @@ export function Toolbar() {
       <div className="flex items-center gap-0.5">
         {toolbarButtons.map((btn, i) =>
           'divider' in btn ? (
-            <div key={i} className="h-5 w-px bg-border-default mx-1" />
+            <div key={i} className="h-4 w-px bg-border-default/60 mx-1" />
           ) : (
             <button
               key={i}
               onClick={btn.action}
               title={btn.label}
-              className="p-2 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+              className="p-2 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
             >
-              <btn.icon size={16} />
+              <btn.icon size={15} />
             </button>
           )
         )}
 
-        <div className="h-5 w-px bg-border-default mx-1" />
+        <div className="h-4 w-px bg-border-default/60 mx-1" />
 
         {/* Magnet */}
         <button
           onClick={toggleMagnet}
           title="Snap magnético"
-          className={`p-2 rounded-lg transition-colors ${
+          className={`p-2 rounded-md transition-colors ${
             magnetEnabled
-              ? 'bg-accent-primary/20 text-accent-primary'
-              : 'hover:bg-bg-hover text-text-secondary hover:text-text-primary'
+              ? 'bg-accent-primary/10 text-accent-primary'
+              : 'hover:bg-bg-hover text-text-muted hover:text-text-secondary'
           }`}
         >
-          <Magnet size={16} />
+          <Magnet size={15} />
         </button>
 
-        <div className="h-5 w-px bg-border-default mx-1" />
+        <div className="h-4 w-px bg-border-default/60 mx-1" />
 
         {/* Zoom */}
         <button
           onClick={() => setZoom(Math.max(0.25, zoom - 0.25))}
-          className="p-2 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+          className="p-2 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
           title="Diminuir zoom"
         >
-          <ZoomOut size={16} />
+          <ZoomOut size={15} />
         </button>
-        <span className="text-xs text-text-muted w-10 text-center">
+        <span className="text-[10px] text-text-muted w-10 text-center font-mono">
           {Math.round(zoom * 100)}%
         </span>
         <button
           onClick={() => setZoom(Math.min(4, zoom + 0.25))}
-          className="p-2 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+          className="p-2 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
           title="Aumentar zoom"
         >
-          <ZoomIn size={16} />
+          <ZoomIn size={15} />
         </button>
       </div>
 
@@ -132,38 +132,38 @@ export function Toolbar() {
       <div className="flex items-center gap-1">
         <button
           onClick={toggleLeftPanel}
-          className="p-2 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+          className="p-2 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
           title={leftPanelOpen ? 'Fechar painel esquerdo' : 'Abrir painel esquerdo'}
         >
           {leftPanelOpen ? (
-            <PanelLeftClose size={16} />
+            <PanelLeftClose size={15} />
           ) : (
-            <PanelLeftOpen size={16} />
+            <PanelLeftOpen size={15} />
           )}
         </button>
         <button
           onClick={toggleRightPanel}
-          className="p-2 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+          className="p-2 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
           title={rightPanelOpen ? 'Fechar painel direito' : 'Abrir painel direito'}
         >
           {rightPanelOpen ? (
-            <PanelRightClose size={16} />
+            <PanelRightClose size={15} />
           ) : (
-            <PanelRightOpen size={16} />
+            <PanelRightOpen size={15} />
           )}
         </button>
 
-        <div className="h-5 w-px bg-border-default mx-1" />
+        <div className="h-4 w-px bg-border-default/60 mx-1" />
 
         <button
-          className="p-2 rounded-lg hover:bg-bg-hover transition-colors text-text-secondary hover:text-text-primary"
+          className="p-2 rounded-md hover:bg-bg-hover transition-colors text-text-muted hover:text-text-secondary"
           title="Salvar (Ctrl+S)"
         >
-          <Save size={16} />
+          <Save size={15} />
         </button>
 
-        <button className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent-primary hover:bg-blue-600 text-white text-sm font-medium transition-colors">
-          <Download size={14} />
+        <button className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accent-primary hover:bg-accent-secondary text-white text-xs font-medium transition-colors">
+          <Download size={13} />
           Exportar
         </button>
       </div>

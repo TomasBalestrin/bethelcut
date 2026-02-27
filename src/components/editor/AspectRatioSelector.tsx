@@ -25,18 +25,18 @@ export function AspectRatioSelector() {
             key={key}
             onClick={() => setAspectRatio(key)}
             className={cn(
-              'flex flex-col items-center gap-1.5 p-2 rounded-lg border transition-colors',
+              'flex flex-col items-center gap-1.5 p-2 rounded-md border transition-colors',
               isActive
-                ? 'border-accent-primary bg-accent-primary/10'
-                : 'border-border-default hover:border-border-active bg-bg-surface'
+                ? 'border-accent-primary/40 bg-accent-primary/8'
+                : 'border-border-default/60 hover:border-border-active/30 bg-bg-surface'
             )}
           >
             <div
               className={cn(
                 'rounded border',
                 isActive
-                  ? 'border-accent-primary bg-accent-primary/20'
-                  : 'border-text-muted/30 bg-bg-hover'
+                  ? 'border-accent-primary/30 bg-accent-primary/15'
+                  : 'border-text-muted/20 bg-bg-hover'
               )}
               style={{
                 width: `${w * 32}px`,

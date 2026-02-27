@@ -59,7 +59,7 @@ export function EditorLayout() {
         {/* Left Panel - Media */}
         {leftPanelOpen && (
           <div
-            className="border-r border-border-default bg-bg-secondary flex-shrink-0 overflow-y-auto"
+            className="border-r border-border-default/60 bg-bg-secondary flex-shrink-0 overflow-y-auto"
             style={{ width: EDITOR_CONFIG.LEFT_PANEL_WIDTH }}
           >
             <MediaPanel />
@@ -74,7 +74,7 @@ export function EditorLayout() {
         {/* Right Panel - Properties */}
         {rightPanelOpen && (
           <div
-            className="border-l border-border-default bg-bg-secondary flex-shrink-0 overflow-y-auto"
+            className="border-l border-border-default/60 bg-bg-secondary flex-shrink-0 overflow-y-auto"
             style={{ width: EDITOR_CONFIG.RIGHT_PANEL_WIDTH }}
           >
             <PropertiesPanel />
@@ -84,17 +84,17 @@ export function EditorLayout() {
 
       {/* Timeline Resize Handle */}
       <div
-        className={`h-1.5 cursor-row-resize flex items-center justify-center hover:bg-accent-primary/20 transition-colors ${
-          isResizingTimeline ? 'bg-accent-primary/30' : 'bg-border-default'
+        className={`h-1 cursor-row-resize flex items-center justify-center transition-colors ${
+          isResizingTimeline ? 'bg-accent-primary/20' : 'bg-border-default/60 hover:bg-accent-primary/10'
         }`}
         onMouseDown={handleResizeStart}
       >
-        <div className="w-12 h-0.5 rounded-full bg-text-muted" />
+        <div className="w-10 h-px rounded-full bg-text-muted/40" />
       </div>
 
       {/* Timeline */}
       <div
-        className="flex-shrink-0 border-t border-border-default bg-bg-timeline overflow-hidden"
+        className="flex-shrink-0 border-t border-border-default/60 bg-bg-timeline overflow-hidden"
         style={{ height: timelineHeight }}
       >
         <Timeline />

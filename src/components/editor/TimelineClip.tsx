@@ -32,7 +32,7 @@ export function TimelineClip({ clip, pixelsPerSecond, scrollX }: TimelineClipPro
       className={cn(
         'absolute top-1 bottom-1 rounded border cursor-pointer transition-shadow',
         colorMap[clip.clipType] || colorMap.video,
-        isSelected && 'ring-2 ring-white/30 shadow-lg'
+        isSelected && 'ring-1 ring-white/20'
       )}
       style={{ left, width: Math.max(width, 4) }}
       onClick={() => setSelectedClipId(clip.id)}

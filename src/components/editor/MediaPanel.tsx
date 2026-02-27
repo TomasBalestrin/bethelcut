@@ -56,7 +56,6 @@ export function MediaPanel() {
       const fileExt = file.name.split('.').pop();
       const filePath = `${user.id}/${currentProject.id}/${crypto.randomUUID()}.${fileExt}`;
 
-      // Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('media')
         .upload(filePath, file, {
@@ -72,12 +71,10 @@ export function MediaPanel() {
         .from('media')
         .getPublicUrl(filePath);
 
-      // Determine media type
       let mediaType: 'video' | 'audio' | 'image' = 'video';
       if (file.type.startsWith('audio/')) mediaType = 'audio';
       if (file.type.startsWith('image/')) mediaType = 'image';
 
-      // Insert media asset record
       const { data: asset, error: insertError } = await supabase
         .from('media_assets')
         .insert({
@@ -149,18 +146,18 @@ export function MediaPanel() {
   return (
     <div className="flex flex-col h-full">
       {/* Tabs */}
-      <div className="flex border-b border-border-default">
+      <div className="flex border-b border-border-default/60">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 flex flex-col items-center gap-1 py-2.5 text-xs transition-colors ${
+            className={`flex-1 flex flex-col items-center gap-1 py-2.5 text-[10px] transition-colors ${
               activeTab === tab.id
-                ? 'text-accent-primary border-b-2 border-accent-primary'
+                ? 'text-accent-primary border-b border-accent-primary'
                 : 'text-text-muted hover:text-text-secondary'
             }`}
           >
-            <tab.icon size={16} />
+            <tab.icon size={14} />
             {tab.label}
           </button>
         ))}
@@ -181,24 +178,24 @@ export function MediaPanel() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading}
-              className="w-full flex flex-col items-center gap-2 p-6 rounded-lg border-2 border-dashed border-border-default hover:border-accent-primary bg-bg-surface/50 hover:bg-bg-surface transition-colors"
+              className="w-full flex flex-col items-center gap-2 p-5 rounded-md border border-dashed border-border-default/60 hover:border-accent-primary/30 bg-bg-surface/30 hover:bg-bg-surface/50 transition-colors"
             >
               <Upload
-                size={24}
+                size={20}
                 className="text-text-muted"
               />
-              <span className="text-sm text-text-secondary">
+              <span className="text-xs text-text-secondary">
                 {isUploading
                   ? `Enviando... ${uploadProgress}%`
                   : 'Importar mídia'}
               </span>
-              <span className="text-xs text-text-muted">
+              <span className="text-[10px] text-text-muted">
                 Vídeo, áudio ou imagem
               </span>
             </button>
 
             {isUploading && (
-              <div className="w-full h-1.5 bg-bg-surface rounded-full overflow-hidden">
+              <div className="w-full h-1 bg-bg-surface rounded-full overflow-hidden">
                 <div
                   className="h-full bg-accent-primary rounded-full transition-all duration-300"
                   style={{ width: `${uploadProgress}%` }}
@@ -207,27 +204,27 @@ export function MediaPanel() {
             )}
 
             {/* Asset List */}
-            <div className="space-y-2">
+            <div className="space-y-1">
               {mediaAssets.map((asset) => {
                 const Icon = getTypeIcon(asset.type);
                 return (
                   <div
                     key={asset.id}
-                    className="group flex items-center gap-3 p-2.5 rounded-lg bg-bg-surface hover:bg-bg-hover transition-colors cursor-pointer"
+                    className="group flex items-center gap-2.5 p-2 rounded-md hover:bg-bg-hover transition-colors cursor-pointer"
                   >
-                    <div className="w-10 h-10 rounded bg-bg-tertiary flex items-center justify-center flex-shrink-0">
+                    <div className="w-9 h-9 rounded-md bg-bg-surface flex items-center justify-center flex-shrink-0 border border-border-default/40">
                       {asset.thumbnailUrl ? (
                         <img
                           src={asset.thumbnailUrl}
                           alt={asset.fileName}
-                          className="w-full h-full object-cover rounded"
+                          className="w-full h-full object-cover rounded-md"
                         />
                       ) : (
-                        <Icon size={18} className="text-text-muted" />
+                        <Icon size={16} className="text-text-muted" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate">
+                      <p className="text-xs font-medium truncate text-text-primary">
                         {asset.fileName}
                       </p>
                       <p className="text-[10px] text-text-muted">
@@ -235,7 +232,7 @@ export function MediaPanel() {
                           ? formatFileSize(asset.fileSizeBytes)
                           : '--'}
                         {asset.durationMs
-                          ? ` • ${formatDuration(asset.durationMs)}`
+                          ? ` · ${formatDuration(asset.durationMs)}`
                           : ''}
                       </p>
                     </div>
@@ -244,9 +241,9 @@ export function MediaPanel() {
                         e.stopPropagation();
                         handleDeleteAsset(asset.id);
                       }}
-                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-accent-danger/20 text-text-muted hover:text-accent-danger transition-all"
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded-md hover:bg-accent-danger/10 text-text-muted hover:text-accent-danger transition-all"
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 );
@@ -254,7 +251,7 @@ export function MediaPanel() {
             </div>
 
             {mediaAssets.length === 0 && !isUploading && (
-              <p className="text-center text-xs text-text-muted py-8">
+              <p className="text-center text-[11px] text-text-muted py-8 leading-relaxed">
                 Nenhuma mídia importada ainda.
                 <br />
                 Arraste um arquivo ou clique para importar.
@@ -265,9 +262,9 @@ export function MediaPanel() {
 
         {activeTab === 'captions' && (
           <div className="text-center py-8">
-            <Subtitles size={32} className="text-text-muted mx-auto mb-3" />
-            <p className="text-sm text-text-secondary">Legendas</p>
-            <p className="text-xs text-text-muted mt-1">
+            <Subtitles size={28} className="text-text-muted/40 mx-auto mb-3" />
+            <p className="text-xs text-text-secondary">Legendas</p>
+            <p className="text-[10px] text-text-muted mt-1">
               Importe um vídeo para gerar legendas automáticas
             </p>
           </div>
@@ -275,9 +272,9 @@ export function MediaPanel() {
 
         {activeTab === 'silence' && (
           <div className="text-center py-8">
-            <Scissors size={32} className="text-text-muted mx-auto mb-3" />
-            <p className="text-sm text-text-secondary">Corte de Silêncio</p>
-            <p className="text-xs text-text-muted mt-1">
+            <Scissors size={28} className="text-text-muted/40 mx-auto mb-3" />
+            <p className="text-xs text-text-secondary">Corte de Silêncio</p>
+            <p className="text-[10px] text-text-muted mt-1">
               Importe um vídeo para detectar e remover silêncios
             </p>
           </div>
@@ -285,9 +282,9 @@ export function MediaPanel() {
 
         {activeTab === 'effects' && (
           <div className="text-center py-8">
-            <Sparkles size={32} className="text-text-muted mx-auto mb-3" />
-            <p className="text-sm text-text-secondary">Efeitos</p>
-            <p className="text-xs text-text-muted mt-1">Em breve</p>
+            <Sparkles size={28} className="text-text-muted/40 mx-auto mb-3" />
+            <p className="text-xs text-text-secondary">Efeitos</p>
+            <p className="text-[10px] text-text-muted mt-1">Em breve</p>
           </div>
         )}
       </div>

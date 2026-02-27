@@ -35,9 +35,9 @@ export function CaptionListEditor() {
       {sortedCaptions.map((caption) => (
         <div
           key={caption.id}
-          className={`p-2.5 rounded-lg border cursor-pointer transition-colors ${
+          className={`p-2.5 rounded-md border cursor-pointer transition-colors ${
             selectedCaptionId === caption.id
-              ? 'border-accent-primary bg-accent-primary/5'
+              ? 'border-accent-primary/30 bg-accent-primary/5'
               : 'border-transparent hover:bg-bg-surface'
           }`}
           onClick={() => {

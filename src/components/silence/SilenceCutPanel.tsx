@@ -27,8 +27,8 @@ export function SilenceCutPanel() {
   return (
     <div className="p-3 space-y-4">
       <div className="flex items-center gap-2">
-        <Scissors size={16} className="text-accent-primary" />
-        <h3 className="text-sm font-semibold">Corte de Silêncio</h3>
+        <Scissors size={14} className="text-accent-primary" />
+        <h3 className="text-xs font-medium text-text-secondary">Corte de Silêncio</h3>
       </div>
 
       {/* Settings */}
@@ -128,10 +128,10 @@ export function SilenceCutPanel() {
             {silenceRegions.map((region, i) => (
               <div
                 key={i}
-                className={`flex items-center gap-2 p-2 rounded-lg text-xs transition-colors ${
+                className={`flex items-center gap-2 p-2 rounded-md text-xs transition-colors ${
                   region.accepted
-                    ? 'bg-accent-danger/10 border border-accent-danger/20'
-                    : 'bg-bg-surface'
+                    ? 'bg-accent-danger/8 border border-accent-danger/15'
+                    : 'bg-bg-surface border border-border-default/40'
                 }`}
               >
                 <button

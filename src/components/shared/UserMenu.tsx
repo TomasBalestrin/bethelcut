@@ -34,16 +34,16 @@ export function UserMenu({ fullName, email, avatarUrl }: UserMenuProps) {
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-bg-hover transition-colors"
+        className="flex items-center gap-2 rounded-md px-2 py-1.5 hover:bg-bg-hover transition-colors"
       >
         {avatarUrl ? (
           <img
             src={avatarUrl}
             alt={fullName || email}
-            className="w-8 h-8 rounded-full object-cover"
+            className="w-7 h-7 rounded-full object-cover"
           />
         ) : (
-          <div className="w-8 h-8 rounded-full bg-accent-primary flex items-center justify-center text-sm font-medium text-white">
+          <div className="w-7 h-7 rounded-full bg-accent-primary/15 flex items-center justify-center text-xs font-medium text-accent-primary">
             {initials}
           </div>
         )}
@@ -58,8 +58,8 @@ export function UserMenu({ fullName, email, avatarUrl }: UserMenuProps) {
             className="fixed inset-0 z-40"
             onClick={() => setIsOpen(false)}
           />
-          <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-border-default bg-bg-secondary shadow-xl z-50">
-            <div className="p-3 border-b border-border-default">
+          <div className="absolute right-0 top-full mt-1 w-52 rounded-md border border-border-default/60 bg-bg-secondary z-50">
+            <div className="p-3 border-b border-border-default/60">
               <p className="text-sm font-medium text-text-primary">
                 {fullName || 'Usuário'}
               </p>
@@ -67,18 +67,18 @@ export function UserMenu({ fullName, email, avatarUrl }: UserMenuProps) {
             </div>
             <div className="p-1">
               <button className="w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors">
-                <User size={16} />
+                <User size={14} />
                 Perfil
               </button>
               <button className="w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors">
-                <Settings size={16} />
+                <Settings size={14} />
                 Configurações
               </button>
               <button
                 onClick={handleSignOut}
                 className="w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm text-accent-danger hover:bg-bg-hover transition-colors"
               >
-                <LogOut size={16} />
+                <LogOut size={14} />
                 Sair
               </button>
             </div>
