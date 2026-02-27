@@ -26,17 +26,41 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
   const [showNewModal, setShowNewModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
 
+  const ensureProfileExists = async () => {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', userId)
+      .single();
+
+    if (!profile) {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from('profiles').insert({
+        id: userId,
+        full_name: user?.user_metadata?.full_name || user?.user_metadata?.name || '',
+        avatar_url: user?.user_metadata?.avatar_url || '',
+      });
+      if (error && error.code !== '23505') {
+        throw new Error(`Erro ao criar perfil: ${error.message}`);
+      }
+    }
+  };
+
   const createProject = async () => {
     if (!newProjectName.trim()) return;
     setIsCreating(true);
+    setCreateError('');
 
     try {
+      await ensureProfileExists();
+
       const { data, error } = await supabase
         .from('projects')
         .insert({
@@ -53,8 +77,10 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
         setNewProjectName('');
         router.push(`/editor/${data.id}`);
       }
-    } catch (err) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error('Error creating project:', err);
+      setCreateError(message || 'Erro ao criar projeto. Verifique se a migration SQL foi executada no Supabase.');
     } finally {
       setIsCreating(false);
     }
@@ -107,7 +133,7 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {/* New Project Card */}
         <button
-          onClick={() => setShowNewModal(true)}
+          onClick={() => { setShowNewModal(true); setCreateError(''); }}
           className="group flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-default/60 hover:border-accent-primary/30 bg-bg-secondary/30 hover:bg-bg-secondary p-8 transition-all min-h-[200px]"
         >
           <div className="w-10 h-10 rounded-md bg-bg-surface flex items-center justify-center border border-border-default/60 group-hover:border-accent-primary/20 transition-colors">
@@ -244,6 +270,11 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
             autoFocus
             required
           />
+          {createError && (
+            <p className="text-xs text-accent-danger bg-accent-danger/8 rounded-md px-3 py-2 border border-accent-danger/15">
+              {createError}
+            </p>
+          )}
           <div className="flex gap-3 justify-end">
             <Button
               variant="ghost"
