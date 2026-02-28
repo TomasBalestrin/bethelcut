@@ -31,27 +31,19 @@ export default function EditorPage() {
   useEffect(() => {
     const loadProject = async () => {
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        // Parallel: fetch project, assets, and tracks at the same time
+        const [projectResult, assetsResult, tracksResult] = await Promise.all([
+          supabase.from('projects').select('*').eq('id', projectId).single(),
+          supabase.from('media_assets').select('*').eq('project_id', projectId),
+          supabase.from('timeline_tracks').select('*').eq('project_id', projectId).order('order_index'),
+        ]);
 
-        if (!user) {
-          router.push('/login');
-          return;
-        }
-
-        const { data: project, error: projectError } = await supabase
-          .from('projects')
-          .select('*')
-          .eq('id', projectId)
-          .single();
-
-        if (projectError || !project) {
+        if (projectResult.error || !projectResult.data) {
           setError('Projeto não encontrado');
           return;
         }
 
-        const p = project as any;
+        const p = projectResult.data as any;
         const mappedProject: Project = {
           id: p.id,
           userId: p.user_id,
@@ -73,12 +65,8 @@ export default function EditorPage() {
         setAspectRatio(p.aspect_ratio as AspectRatioKey);
         setDurationMs(p.duration_ms);
 
-        // Load media assets
-        const { data: assets } = await supabase
-          .from('media_assets')
-          .select('*')
-          .eq('project_id', projectId);
-
+        // Set media assets
+        const assets = assetsResult.data;
         if (assets && assets.length > 0) {
           const mapped: MediaAsset[] = (assets as any[]).map((a) => ({
             id: a.id,
@@ -100,13 +88,8 @@ export default function EditorPage() {
           setMediaAssets(mapped);
         }
 
-        // Load timeline tracks
-        const { data: tracksData } = await supabase
-          .from('timeline_tracks')
-          .select('*')
-          .eq('project_id', projectId)
-          .order('order_index');
-
+        // Set timeline tracks + clips
+        const tracksData = tracksResult.data;
         if (tracksData && tracksData.length > 0) {
           const trackIds = (tracksData as any[]).map((t) => t.id);
           const { data: clipsData } = await supabase
@@ -144,24 +127,14 @@ export default function EditorPage() {
             }))
           );
         } else {
-          // Auto-create default tracks if none exist
-          const defaultTracks = [
-            { type: 'video', label: 'Video', order_index: 0 },
-            { type: 'audio', label: 'Audio', order_index: 1 },
-            { type: 'caption', label: 'Legendas', order_index: 2 },
-          ];
-
+          // Fallback: auto-create default tracks if none exist (old projects)
           const { data: newTracks } = await supabase
             .from('timeline_tracks')
-            .insert(
-              defaultTracks.map((t) => ({
-                project_id: projectId,
-                type: t.type,
-                label: t.label,
-                order_index: t.order_index,
-                height: 60,
-              }))
-            )
+            .insert([
+              { project_id: projectId, type: 'video', label: 'Video', order_index: 0, height: 60 },
+              { project_id: projectId, type: 'audio', label: 'Audio', order_index: 1, height: 60 },
+              { project_id: projectId, type: 'caption', label: 'Legendas', order_index: 2, height: 60 },
+            ])
             .select();
 
           if (newTracks && newTracks.length > 0) {

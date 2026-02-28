@@ -72,6 +72,13 @@ export function ProjectList({ initialProjects, userId }: ProjectListProps) {
 
       if (error) throw error;
       if (data) {
+        // Create default timeline tracks immediately (don't wait for editor)
+        supabase.from('timeline_tracks').insert([
+          { project_id: data.id, type: 'video', label: 'Video', order_index: 0, height: 60 },
+          { project_id: data.id, type: 'audio', label: 'Audio', order_index: 1, height: 60 },
+          { project_id: data.id, type: 'caption', label: 'Legendas', order_index: 2, height: 60 },
+        ]);
+
         setProjects([data, ...projects]);
         setShowNewModal(false);
         setNewProjectName('');
