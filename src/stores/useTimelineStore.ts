@@ -3,6 +3,8 @@
 import { create } from 'zustand';
 import type { TimelineTrack, TimelineClip } from '@/types/timeline';
 
+const MAX_HISTORY = 50;
+
 interface TimelineStore {
   tracks: TimelineTrack[];
   pixelsPerSecond: number;
@@ -11,6 +13,10 @@ interface TimelineStore {
   snapEnabled: boolean;
   magnetEnabled: boolean;
   timelineHeight: number;
+
+  // Undo/Redo history
+  _history: TimelineTrack[][];
+  _future: TimelineTrack[][];
 
   setTracks: (tracks: TimelineTrack[]) => void;
   addTrack: (track: TimelineTrack) => void;
@@ -28,6 +34,10 @@ interface TimelineStore {
   toggleSnap: () => void;
   toggleMagnet: () => void;
   setTimelineHeight: (height: number) => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
   reset: () => void;
 }
 
@@ -39,7 +49,14 @@ const initialState = {
   snapEnabled: true,
   magnetEnabled: true,
   timelineHeight: 250,
+  _history: [] as TimelineTrack[][],
+  _future: [] as TimelineTrack[][],
 };
+
+// Helper: deep clone tracks for history snapshots
+function cloneTracks(tracks: TimelineTrack[]): TimelineTrack[] {
+  return tracks.map((t) => ({ ...t, clips: t.clips.map((c) => ({ ...c, properties: { ...c.properties } })) }));
+}
 
 export const useTimelineStore = create<TimelineStore>((set, get) => ({
   ...initialState,
@@ -85,8 +102,9 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
     })),
 
   splitClipAtPlayhead: (playheadMs) =>
-    set((state) => ({
-      tracks: state.tracks.map((track) => {
+    set((state) => {
+      const snapshot = cloneTracks(state.tracks);
+      const newTracks = state.tracks.map((track) => {
         const clipIndex = track.clips.findIndex(
           (c) => c.startTimeMs < playheadMs && c.endTimeMs > playheadMs
         );
@@ -113,8 +131,18 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
         const newClips = [...track.clips];
         newClips.splice(clipIndex, 1, clip1, clip2);
         return { ...track, clips: newClips };
-      }),
-    })),
+      });
+
+      // Only push history if tracks actually changed
+      const changed = newTracks !== state.tracks;
+      return {
+        tracks: newTracks,
+        _history: changed
+          ? [...state._history.slice(-(MAX_HISTORY - 1)), snapshot]
+          : state._history,
+        _future: changed ? [] : state._future,
+      };
+    }),
 
   findClipById: (clipId) => {
     const state = get();
@@ -126,12 +154,46 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
   },
 
   removeClipById: (clipId) =>
-    set((state) => ({
-      tracks: state.tracks.map((t) => ({
+    set((state) => {
+      const snapshot = cloneTracks(state.tracks);
+      const newTracks = state.tracks.map((t) => ({
         ...t,
         clips: t.clips.filter((c) => c.id !== clipId),
-      })),
-    })),
+      }));
+      const hadClip = state.tracks.some((t) => t.clips.some((c) => c.id === clipId));
+      return {
+        tracks: newTracks,
+        _history: hadClip
+          ? [...state._history.slice(-(MAX_HISTORY - 1)), snapshot]
+          : state._history,
+        _future: hadClip ? [] : state._future,
+      };
+    }),
+
+  undo: () =>
+    set((state) => {
+      if (state._history.length === 0) return state;
+      const previous = state._history[state._history.length - 1];
+      return {
+        tracks: previous,
+        _history: state._history.slice(0, -1),
+        _future: [cloneTracks(state.tracks), ...state._future].slice(0, MAX_HISTORY),
+      };
+    }),
+
+  redo: () =>
+    set((state) => {
+      if (state._future.length === 0) return state;
+      const next = state._future[0];
+      return {
+        tracks: next,
+        _history: [...state._history, cloneTracks(state.tracks)].slice(-MAX_HISTORY),
+        _future: state._future.slice(1),
+      };
+    }),
+
+  canUndo: () => get()._history.length > 0,
+  canRedo: () => get()._future.length > 0,
 
   setPixelsPerSecond: (pps) => set({ pixelsPerSecond: pps }),
   setScrollX: (x) => set({ scrollX: x }),

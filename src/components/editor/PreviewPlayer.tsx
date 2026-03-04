@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -22,6 +22,7 @@ import { formatDuration } from '@/lib/utils';
 export function PreviewPlayer() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const seekingRef = useRef(false);
 
   const isPlaying = useEditorStore((s) => s.isPlaying);
   const setIsPlaying = useEditorStore((s) => s.setIsPlaying);
@@ -46,19 +47,40 @@ export function PreviewPlayer() {
   const [videoError, setVideoError] = useState(false);
   const supabase = createClient();
 
-  // Find video asset: try from timeline clip first, then fall back to direct asset
+  // Get all video clips sorted by startTimeMs
   const videoTrack = tracks.find((t) => t.type === 'video');
-  const firstVideoClip = videoTrack?.clips[0];
-  const clipAsset = firstVideoClip?.assetId
-    ? mediaAssets.find((a) => a.id === firstVideoClip.assetId)
+  const videoClips = useMemo(() => {
+    if (!videoTrack) return [];
+    return [...videoTrack.clips].sort((a, b) => a.startTimeMs - b.startTimeMs);
+  }, [videoTrack]);
+
+  // Find the active clip at the current playhead position
+  const activeClip = useMemo(() => {
+    return videoClips.find(
+      (c) => currentTimeMs >= c.startTimeMs && currentTimeMs < c.endTimeMs
+    ) ?? null;
+  }, [videoClips, currentTimeMs]);
+
+  // Resolve the video asset for the active clip
+  const activeAsset = activeClip?.assetId
+    ? mediaAssets.find((a) => a.id === activeClip.assetId)
     : null;
-  const directAsset = mediaAssets.find((a) => a.type === 'video');
-  const videoAsset = clipAsset || directAsset;
+
+  // Fallback: if no active clip but we have assets, use first video asset
+  const fallbackAsset = mediaAssets.find((a) => a.type === 'video');
+  const videoAsset = activeAsset || (videoClips.length === 0 ? fallbackAsset : null);
+
+  // Compute the total timeline duration from all clips
+  const totalDuration = useMemo(() => {
+    if (videoClips.length === 0) return durationMs;
+    const maxEnd = Math.max(...videoClips.map((c) => c.endTimeMs));
+    return Math.max(durationMs, maxEnd);
+  }, [videoClips, durationMs]);
 
   const ratioConfig = ASPECT_RATIOS[aspectRatio];
   const aspectRatioValue = ratioConfig.width / ratioConfig.height;
 
-  // Reset video states when asset changes
+  // Reset video states when active asset changes
   useEffect(() => {
     setVideoReady(false);
     setVideoError(false);
@@ -69,12 +91,12 @@ export function PreviewPlayer() {
     const video = videoRef.current;
     if (!video) return;
 
-    if (isPlaying) {
+    if (isPlaying && activeClip) {
       video.play().catch(() => setIsPlaying(false));
     } else {
       video.pause();
     }
-  }, [isPlaying, setIsPlaying]);
+  }, [isPlaying, setIsPlaying, activeClip]);
 
   // Volume sync
   useEffect(() => {
@@ -84,29 +106,82 @@ export function PreviewPlayer() {
     video.muted = isMuted;
   }, [volume, isMuted]);
 
-  // Bidirectional sync: when currentTimeMs changes externally (timeline click), seek video
+  // Sync video position to active clip's source time
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !activeClip || seekingRef.current) return;
+
+    // Calculate where in the source file we should be
+    const clipDuration = activeClip.endTimeMs - activeClip.startTimeMs;
+    const offsetInClip = currentTimeMs - activeClip.startTimeMs;
+    const sourceDuration = activeClip.sourceOutMs - activeClip.sourceInMs;
+    const ratio = clipDuration > 0 ? offsetInClip / clipDuration : 0;
+    const targetSourceMs = activeClip.sourceInMs + sourceDuration * ratio;
+    const targetSec = targetSourceMs / 1000;
 
     const videoTimeMs = Math.round(video.currentTime * 1000);
-    // Only seek if the difference is significant (= external change, not from timeupdate)
-    if (Math.abs(currentTimeMs - videoTimeMs) > 250) {
-      const targetSec = currentTimeMs / 1000;
+    const targetMs = Math.round(targetSourceMs);
+
+    // Only seek if difference is significant (avoid oscillation)
+    if (Math.abs(videoTimeMs - targetMs) > 150) {
       if (Number.isFinite(video.duration)) {
         video.currentTime = Math.max(0, Math.min(video.duration, targetSec));
       } else {
         video.currentTime = Math.max(0, targetSec);
       }
     }
-  }, [currentTimeMs]);
+  }, [currentTimeMs, activeClip]);
 
-  // Video drives currentTimeMs while playing
+  // Video drives currentTimeMs while playing - map source time back to timeline time
   const handleTimeUpdate = useCallback(() => {
     const video = videoRef.current;
-    if (!video) return;
-    setCurrentTimeMs(Math.round(video.currentTime * 1000));
+    if (!video || seekingRef.current) return;
+
+    const clip = useTimelineStore.getState().tracks
+      .find((t) => t.type === 'video')
+      ?.clips.find((c) => {
+        const sourceMs = video.currentTime * 1000;
+        return sourceMs >= c.sourceInMs - 50 && sourceMs <= c.sourceOutMs + 50;
+      });
+
+    if (clip) {
+      const sourceDuration = clip.sourceOutMs - clip.sourceInMs;
+      const clipDuration = clip.endTimeMs - clip.startTimeMs;
+      const sourceOffset = video.currentTime * 1000 - clip.sourceInMs;
+      const ratio = sourceDuration > 0 ? sourceOffset / sourceDuration : 0;
+      const timelineMs = clip.startTimeMs + clipDuration * ratio;
+      setCurrentTimeMs(Math.round(Math.max(clip.startTimeMs, Math.min(clip.endTimeMs, timelineMs))));
+    } else {
+      setCurrentTimeMs(Math.round(video.currentTime * 1000));
+    }
   }, [setCurrentTimeMs]);
+
+  // Handle end of active clip during playback - advance to next clip
+  useEffect(() => {
+    if (!isPlaying || !activeClip) return;
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    const checkClipEnd = () => {
+      if (!isPlaying) return;
+      const sourceTimeMs = video.currentTime * 1000;
+      if (sourceTimeMs >= activeClip.sourceOutMs - 30) {
+        // Find next clip
+        const nextClip = videoClips.find((c) => c.startTimeMs >= activeClip.endTimeMs);
+        if (nextClip) {
+          setCurrentTimeMs(nextClip.startTimeMs);
+        } else {
+          // No more clips - stop
+          setIsPlaying(false);
+          setCurrentTimeMs(activeClip.endTimeMs);
+        }
+      }
+    };
+
+    const interval = setInterval(checkClipEnd, 50);
+    return () => clearInterval(interval);
+  }, [isPlaying, activeClip, videoClips, setCurrentTimeMs, setIsPlaying]);
 
   // When video data is loaded enough to display a frame
   const handleCanPlay = useCallback(() => {
@@ -125,13 +200,14 @@ export function PreviewPlayer() {
     setDurationMs(realDurationMs);
 
     // Fix clip duration if it was created with a default (30s)
-    if (firstVideoClip && videoTrack) {
-      const clipDuration = firstVideoClip.endTimeMs - firstVideoClip.startTimeMs;
-      if (Math.abs(clipDuration - realDurationMs) > 500) {
-        const newEndTime = firstVideoClip.startTimeMs + realDurationMs;
+    const firstClip = videoClips[0];
+    if (firstClip && videoTrack) {
+      const clipDuration = firstClip.endTimeMs - firstClip.startTimeMs;
+      if (Math.abs(clipDuration - realDurationMs) > 500 && videoClips.length === 1) {
+        const newEndTime = firstClip.startTimeMs + realDurationMs;
 
         // Update clip in store
-        updateClip(videoTrack.id, firstVideoClip.id, {
+        updateClip(videoTrack.id, firstClip.id, {
           endTimeMs: newEndTime,
           sourceOutMs: realDurationMs,
         });
@@ -143,13 +219,13 @@ export function PreviewPlayer() {
             end_time_ms: newEndTime,
             source_out_ms: realDurationMs,
           })
-          .eq('id', firstVideoClip.id);
+          .eq('id', firstClip.id);
 
-        if (firstVideoClip.assetId) {
+        if (firstClip.assetId) {
           supabase
             .from('media_assets')
             .update({ duration_ms: realDurationMs })
-            .eq('id', firstVideoClip.assetId);
+            .eq('id', firstClip.assetId);
         }
 
         if (currentProject) {
@@ -161,7 +237,7 @@ export function PreviewPlayer() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setDurationMs, firstVideoClip?.id, videoTrack?.id, currentProject?.id]);
+  }, [setDurationMs, videoClips, videoTrack?.id, currentProject?.id]);
 
   const handleError = useCallback(() => {
     setVideoError(true);
@@ -170,30 +246,45 @@ export function PreviewPlayer() {
 
   const handleSeek = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const video = videoRef.current;
-      if (!video) return;
+      seekingRef.current = true;
       const timeMs = Number(e.target.value);
-      video.currentTime = timeMs / 1000;
       setCurrentTimeMs(timeMs);
+
+      // Find the clip at the seek position and set video time
+      const video = videoRef.current;
+      const clip = videoClips.find(
+        (c) => timeMs >= c.startTimeMs && timeMs < c.endTimeMs
+      );
+      if (video && clip) {
+        const clipDuration = clip.endTimeMs - clip.startTimeMs;
+        const offset = timeMs - clip.startTimeMs;
+        const sourceDuration = clip.sourceOutMs - clip.sourceInMs;
+        const ratio = clipDuration > 0 ? offset / clipDuration : 0;
+        const sourceTime = (clip.sourceInMs + sourceDuration * ratio) / 1000;
+        video.currentTime = sourceTime;
+      }
+
+      // Release seeking flag after a tick
+      requestAnimationFrame(() => {
+        seekingRef.current = false;
+      });
     },
-    [setCurrentTimeMs]
+    [setCurrentTimeMs, videoClips]
   );
 
   const handleEnded = useCallback(() => {
-    setIsPlaying(false);
-  }, [setIsPlaying]);
+    // Don't stop - the clip end check interval handles advancing
+  }, []);
 
   const skipForward = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = Math.min(video.duration || 0, video.currentTime + 5);
-  }, []);
+    const newTime = Math.min(totalDuration, currentTimeMs + 5000);
+    setCurrentTimeMs(newTime);
+  }, [currentTimeMs, totalDuration, setCurrentTimeMs]);
 
   const skipBackward = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = Math.max(0, video.currentTime - 5);
-  }, []);
+    const newTime = Math.max(0, currentTimeMs - 5000);
+    setCurrentTimeMs(newTime);
+  }, [currentTimeMs, setCurrentTimeMs]);
 
   const toggleFullscreen = useCallback(() => {
     const container = containerRef.current;
@@ -204,6 +295,9 @@ export function PreviewPlayer() {
       container.requestFullscreen();
     }
   }, []);
+
+  // Show black when playhead is in a gap (no active clip)
+  const isInGap = videoClips.length > 0 && !activeClip;
 
   return (
     <div className="flex flex-col items-center gap-3 w-full h-full max-h-full">
@@ -231,6 +325,7 @@ export function PreviewPlayer() {
                 crossOrigin="anonymous"
                 preload="auto"
                 className="w-full h-full object-contain"
+                style={{ opacity: isInGap ? 0 : 1 }}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onCanPlay={handleCanPlay}
@@ -238,6 +333,11 @@ export function PreviewPlayer() {
                 onError={handleError}
                 playsInline
               />
+
+              {/* Gap overlay - show black when between clips */}
+              {isInGap && (
+                <div className="absolute inset-0 bg-black" />
+              )}
 
               {/* Loading overlay */}
               {!videoReady && !videoError && (
@@ -271,7 +371,11 @@ export function PreviewPlayer() {
           ) : (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-text-muted">
               <Play size={40} className="mb-3 opacity-20" />
-              <p className="text-xs">Importe um vídeo para começar</p>
+              <p className="text-xs">
+                {videoClips.length > 0 && isInGap
+                  ? 'Espaço vazio na timeline'
+                  : 'Importe um vídeo para começar'}
+              </p>
             </div>
           )}
         </div>
@@ -287,13 +391,13 @@ export function PreviewPlayer() {
           <input
             type="range"
             min={0}
-            max={durationMs || 100}
+            max={totalDuration || 100}
             value={currentTimeMs}
             onChange={handleSeek}
             className="flex-1 h-1 cursor-pointer"
           />
           <span className="text-[10px] text-text-muted w-14 font-mono">
-            {formatDuration(durationMs)}
+            {formatDuration(totalDuration)}
           </span>
         </div>
 
