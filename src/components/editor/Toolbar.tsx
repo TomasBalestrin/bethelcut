@@ -33,19 +33,33 @@ export function Toolbar() {
   const toggleRightPanel = useEditorStore((s) => s.toggleRightPanel);
   const zoom = useEditorStore((s) => s.zoom);
   const setZoom = useEditorStore((s) => s.setZoom);
+  const currentTimeMs = useEditorStore((s) => s.currentTimeMs);
+  const selectedClipId = useEditorStore((s) => s.selectedClipId);
+  const setSelectedClipId = useEditorStore((s) => s.setSelectedClipId);
   const currentProject = useProjectStore((s) => s.currentProject);
   const isSaving = useProjectStore((s) => s.isSaving);
   const magnetEnabled = useTimelineStore((s) => s.magnetEnabled);
   const toggleMagnet = useTimelineStore((s) => s.toggleMagnet);
+  const splitClipAtPlayhead = useTimelineStore((s) => s.splitClipAtPlayhead);
+  const removeClipById = useTimelineStore((s) => s.removeClipById);
 
   const toolbarButtons = [
     { icon: Undo2, label: 'Desfazer (Ctrl+Z)', action: () => {} },
     { icon: Redo2, label: 'Refazer (Ctrl+Shift+Z)', action: () => {} },
     { divider: true },
-    { icon: Scissors, label: 'Cortar (B)', action: () => {} },
-    { icon: Trash2, label: 'Excluir (Del)', action: () => {} },
+    { icon: Scissors, label: 'Cortar (B)', action: () => splitClipAtPlayhead(currentTimeMs) },
+    {
+      icon: Trash2,
+      label: 'Excluir (Del)',
+      action: () => {
+        if (selectedClipId) {
+          removeClipById(selectedClipId);
+          setSelectedClipId(null);
+        }
+      },
+    },
     { icon: Copy, label: 'Duplicar', action: () => {} },
-    { icon: SplitSquareHorizontal, label: 'Dividir', action: () => {} },
+    { icon: SplitSquareHorizontal, label: 'Dividir', action: () => splitClipAtPlayhead(currentTimeMs) },
   ];
 
   return (

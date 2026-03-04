@@ -2,10 +2,18 @@
 
 import { useEffect } from 'react';
 import { useEditorStore } from '@/stores/useEditorStore';
+import { useTimelineStore } from '@/stores/useTimelineStore';
 
 export function useKeyboardShortcuts() {
   const togglePlayPause = useEditorStore((s) => s.togglePlayPause);
-  const setZoom = useEditorStore((s) => s.zoom);
+  const currentTimeMs = useEditorStore((s) => s.currentTimeMs);
+  const selectedClipId = useEditorStore((s) => s.selectedClipId);
+  const setSelectedClipId = useEditorStore((s) => s.setSelectedClipId);
+  const zoom = useEditorStore((s) => s.zoom);
+  const setZoom = useEditorStore((s) => s.setZoom);
+
+  const splitClipAtPlayhead = useTimelineStore((s) => s.splitClipAtPlayhead);
+  const removeClipById = useTimelineStore((s) => s.removeClipById);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -28,25 +36,43 @@ export function useKeyboardShortcuts() {
           break;
         case 'b':
         case 'B':
-          // Split at playhead
+          e.preventDefault();
+          splitClipAtPlayhead(currentTimeMs);
           break;
         case 'Delete':
         case 'Backspace':
-          // Delete selected clip
+          e.preventDefault();
+          if (selectedClipId) {
+            removeClipById(selectedClipId);
+            setSelectedClipId(null);
+          }
           break;
         case 'z':
           if (isCtrl && e.shiftKey) {
             e.preventDefault();
-            // Redo
+            // Redo - future implementation
           } else if (isCtrl) {
             e.preventDefault();
-            // Undo
+            // Undo - future implementation
           }
           break;
         case 's':
           if (isCtrl) {
             e.preventDefault();
-            // Save
+            // Save - future implementation
+          }
+          break;
+        case '=':
+        case '+':
+          if (isCtrl) {
+            e.preventDefault();
+            setZoom(Math.min(4, zoom + 0.25));
+          }
+          break;
+        case '-':
+          if (isCtrl) {
+            e.preventDefault();
+            setZoom(Math.max(0.25, zoom - 0.25));
           }
           break;
       }
@@ -54,5 +80,14 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlayPause, setZoom]);
+  }, [
+    togglePlayPause,
+    currentTimeMs,
+    selectedClipId,
+    setSelectedClipId,
+    splitClipAtPlayhead,
+    removeClipById,
+    zoom,
+    setZoom,
+  ]);
 }
