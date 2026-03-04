@@ -38,8 +38,10 @@ export function useKeyboardShortcuts() {
           break;
         case 'b':
         case 'B':
-          e.preventDefault();
-          splitClipAtPlayhead(currentTimeMs);
+          if (!isCtrl) {
+            e.preventDefault();
+            splitClipAtPlayhead(currentTimeMs);
+          }
           break;
         case 'Delete':
         case 'Backspace':
