@@ -5,6 +5,7 @@ import { useEditorStore } from '@/stores/useEditorStore';
 import { useTimelineStore } from '@/stores/useTimelineStore';
 import { EDITOR_CONFIG } from '@/lib/constants';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { useAutoWaveform } from '@/hooks/useAutoWaveform';
 import { Toolbar } from './Toolbar';
 import { MediaPanel } from './MediaPanel';
 import { PreviewPlayer } from './PreviewPlayer';
@@ -14,6 +15,7 @@ import { clamp } from '@/lib/utils';
 
 export function EditorLayout() {
   useKeyboardShortcuts();
+  useAutoWaveform();
 
   const leftPanelOpen = useEditorStore((s) => s.leftPanelOpen);
   const rightPanelOpen = useEditorStore((s) => s.rightPanelOpen);

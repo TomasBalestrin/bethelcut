@@ -17,6 +17,7 @@ import { useEditorStore } from '@/stores/useEditorStore';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useTimelineStore } from '@/stores/useTimelineStore';
 import { SilenceCutPanel } from '@/components/silence/SilenceCutPanel';
+import { TextBasedEditor } from '@/components/transcription/TextBasedEditor';
 import { createClient } from '@/lib/supabase/client';
 import { formatFileSize, formatDuration } from '@/lib/utils';
 import type { MediaAsset } from '@/types/project';
@@ -382,13 +383,7 @@ export function MediaPanel() {
         )}
 
         {activeTab === 'captions' && (
-          <div className="text-center py-8">
-            <Subtitles size={28} className="text-text-muted/40 mx-auto mb-3" />
-            <p className="text-xs text-text-secondary">Legendas</p>
-            <p className="text-[10px] text-text-muted mt-1">
-              Importe um vídeo para gerar legendas automáticas
-            </p>
-          </div>
+          <TextBasedEditor />
         )}
 
         {activeTab === 'silence' && (
