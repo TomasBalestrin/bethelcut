@@ -13,27 +13,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { assetId, projectId, language = 'pt' } = body;
+    // Parse FormData (audio WAV blob extracted client-side + metadata)
+    const formData = await request.formData();
+    const audioFile = formData.get('audio') as File | null;
+    const assetId = formData.get('assetId') as string | null;
+    const projectId = formData.get('projectId') as string | null;
+    const language = (formData.get('language') as string) || 'pt';
 
-    if (!assetId || !projectId) {
+    if (!audioFile || !assetId || !projectId) {
       return NextResponse.json(
-        { error: 'assetId e projectId são obrigatórios' },
+        { error: 'audio, assetId e projectId são obrigatórios' },
         { status: 400 }
-      );
-    }
-
-    // Get the media asset URL
-    const { data: asset, error: assetError } = await supabase
-      .from('media_assets')
-      .select('file_url, file_name')
-      .eq('id', assetId)
-      .single();
-
-    if (assetError || !asset) {
-      return NextResponse.json(
-        { error: 'Asset não encontrado' },
-        { status: 404 }
       );
     }
 
@@ -54,36 +44,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
 
-    // Download the video/audio file
-    const fileResponse = await fetch(asset.file_url);
-    if (!fileResponse.ok) {
-      await supabase
-        .from('transcriptions')
-        .update({ status: 'failed', error_message: 'Falha ao baixar o arquivo' })
-        .eq('id', transcription.id);
-      return NextResponse.json(
-        { error: 'Falha ao baixar o arquivo de mídia' },
-        { status: 500 }
-      );
-    }
-
-    const fileBuffer = await fileResponse.arrayBuffer();
-    const fileName = asset.file_name || 'audio.mp4';
-
-    // Call OpenAI Whisper API
+    // Call OpenAI Whisper API with the pre-extracted WAV audio
     const openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
     });
 
     const startTime = Date.now();
 
-    const file = new File([fileBuffer], fileName, {
-      type: 'audio/mp4',
-    });
-
     const whisperResponse = await openai.audio.transcriptions.create({
       model: 'whisper-1',
-      file,
+      file: audioFile,
       language,
       response_format: 'verbose_json',
       timestamp_granularities: ['word', 'segment'],

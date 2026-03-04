@@ -17,6 +17,8 @@ import { useProjectStore } from '@/stores/useProjectStore';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useTimelineStore } from '@/stores/useTimelineStore';
 import { formatDuration } from '@/lib/utils';
+import { decodeAudioFromVideo } from '@/lib/audio/waveform';
+import { encodeAudioBufferToWav } from '@/lib/audio/wav-encoder';
 
 type Phase = 'idle' | 'transcribing' | 'editing';
 
@@ -49,6 +51,7 @@ export function TextBasedEditor() {
   } = useTranscriptionStore();
 
   const [phase, setPhase] = useState<Phase>(words.length > 0 ? 'editing' : 'idle');
+  const [progressMsg, setProgressMsg] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const lastClickedIndexRef = useRef<number | null>(null);
@@ -71,14 +74,25 @@ export function TextBasedEditor() {
     setPhase('transcribing');
 
     try {
+      // Step 1: Extract audio client-side (avoids 25MB video limit on Whisper)
+      setProgressMsg('Extraindo áudio do vídeo...');
+      const audioBuffer = await decodeAudioFromVideo(videoAsset.fileUrl);
+
+      // Step 2: Encode as 16kHz mono WAV (much smaller than full video)
+      setProgressMsg('Codificando áudio...');
+      const wavBlob = encodeAudioBufferToWav(audioBuffer);
+
+      // Step 3: Send audio + metadata as FormData
+      setProgressMsg('Enviando para transcrição...');
+      const formData = new FormData();
+      formData.append('audio', wavBlob, 'audio.wav');
+      formData.append('assetId', videoAsset.id);
+      formData.append('projectId', currentProject.id);
+      formData.append('language', 'pt');
+
       const response = await fetch('/api/transcription', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          assetId: videoAsset.id,
-          projectId: currentProject.id,
-          language: 'pt',
-        }),
+        body: formData,
       });
 
       const data = await response.json();
@@ -100,6 +114,7 @@ export function TextBasedEditor() {
       setPhase('idle');
     } finally {
       setIsTranscribing(false);
+      setProgressMsg('');
     }
   }, [videoAsset, currentProject, setError, setIsTranscribing, setTranscription]);
 
@@ -215,7 +230,7 @@ export function TextBasedEditor() {
       {phase === 'transcribing' && (
         <div className="flex flex-col items-center gap-3 py-4">
           <Loader2 size={24} className="text-accent-primary animate-spin" />
-          <p className="text-xs text-text-secondary">Transcrevendo áudio...</p>
+          <p className="text-xs text-text-secondary">{progressMsg || 'Transcrevendo áudio...'}</p>
           <p className="text-[10px] text-text-muted">
             Isso pode levar alguns minutos dependendo do tamanho do vídeo
           </p>
