@@ -26,6 +26,7 @@ interface TimelineStore {
   removeClip: (trackId: string, clipId: string) => void;
   updateClip: (trackId: string, clipId: string, updates: Partial<TimelineClip>) => void;
   splitClipAtPlayhead: (playheadMs: number) => void;
+  removeSilenceRegions: (regions: { startMs: number; endMs: number }[]) => void;
   findClipById: (clipId: string) => { track: TimelineTrack; clip: TimelineClip } | null;
   removeClipById: (clipId: string) => void;
   setPixelsPerSecond: (pps: number) => void;
@@ -141,6 +142,86 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
           ? [...state._history.slice(-(MAX_HISTORY - 1)), snapshot]
           : state._history,
         _future: changed ? [] : state._future,
+      };
+    }),
+
+  removeSilenceRegions: (regions) =>
+    set((state) => {
+      if (regions.length === 0) return state;
+      const snapshot = cloneTracks(state.tracks);
+
+      // Sort regions by startMs ascending
+      const sorted = [...regions].sort((a, b) => a.startMs - b.startMs);
+
+      const newTracks = state.tracks.map((track) => {
+        if (track.type !== 'video' && track.type !== 'audio') return track;
+
+        let currentClips = [...track.clips];
+
+        // For each silence region, split clips that overlap and remove the silent part
+        for (const region of sorted) {
+          const resultClips: TimelineClip[] = [];
+
+          for (const clip of currentClips) {
+            // No overlap - keep clip as is
+            if (clip.endTimeMs <= region.startMs || clip.startTimeMs >= region.endMs) {
+              resultClips.push(clip);
+              continue;
+            }
+
+            const clipDuration = clip.endTimeMs - clip.startTimeMs;
+            const sourceDuration = clip.sourceOutMs - clip.sourceInMs;
+
+            // Part before silence
+            if (clip.startTimeMs < region.startMs) {
+              const ratio = (region.startMs - clip.startTimeMs) / clipDuration;
+              resultClips.push({
+                ...clip,
+                endTimeMs: region.startMs,
+                sourceOutMs: clip.sourceInMs + sourceDuration * ratio,
+              });
+            }
+
+            // Part after silence
+            if (clip.endTimeMs > region.endMs) {
+              const ratioStart = (region.endMs - clip.startTimeMs) / clipDuration;
+              resultClips.push({
+                ...clip,
+                id: crypto.randomUUID(),
+                startTimeMs: region.endMs,
+                sourceInMs: clip.sourceInMs + sourceDuration * ratioStart,
+              });
+            }
+
+            // If clip is entirely within silence, it's dropped
+          }
+
+          currentClips = resultClips;
+        }
+
+        // Now close gaps: shift clips left to remove empty spaces
+        const sortedClips = currentClips.sort((a, b) => a.startTimeMs - b.startTimeMs);
+        let nextStart = 0;
+        const compactedClips: TimelineClip[] = [];
+
+        for (const clip of sortedClips) {
+          const duration = clip.endTimeMs - clip.startTimeMs;
+          compactedClips.push({
+            ...clip,
+            startTimeMs: nextStart,
+            endTimeMs: nextStart + duration,
+            orderIndex: compactedClips.length,
+          });
+          nextStart += duration;
+        }
+
+        return { ...track, clips: compactedClips };
+      });
+
+      return {
+        tracks: newTracks,
+        _history: [...state._history.slice(-(MAX_HISTORY - 1)), snapshot],
+        _future: [],
       };
     }),
 
