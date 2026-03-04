@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useTimelineStore } from '@/stores/useTimelineStore';
+import { useAudioStore } from '@/stores/useAudioStore';
 import { useTimelineInteractions } from '@/hooks/useTimelineInteractions';
-import { THEME } from '@/lib/constants';
+import { THEME, EDITOR_CONFIG } from '@/lib/constants';
 import { formatDuration, msToTimelinePixels } from '@/lib/utils';
 import { Lock, Eye, EyeOff, Volume2, VolumeX } from 'lucide-react';
 
@@ -23,6 +24,7 @@ export function Timeline() {
   const selectedClipId = useEditorStore((s) => s.selectedClipId);
 
   const mediaAssets = useProjectStore((s) => s.mediaAssets);
+  const waveformData = useAudioStore((s) => s.waveformData);
   const tracks = useTimelineStore((s) => s.tracks);
   const pixelsPerSecond = useTimelineStore((s) => s.pixelsPerSecond);
   const scrollX = useTimelineStore((s) => s.scrollX);
@@ -179,6 +181,57 @@ export function Timeline() {
         ctx.fillStyle = clipColor + (isSelected ? 'cc' : '80');
         ctx.fillRect(clipX, clipY, clipWidth, isSelected ? 2 : 1);
 
+        // Draw waveform inside video/audio clips
+        if (waveformData.length > 0 && (clip.clipType === 'video' || clip.clipType === 'audio' || isSilence) && clipWidth > 2) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(clipX, clipY, clipWidth, clipH);
+          ctx.clip();
+
+          const samplesPerMs = EDITOR_CONFIG.WAVEFORM_SAMPLES_PER_SECOND / 1000;
+          const startSample = Math.floor(clip.sourceInMs * samplesPerMs);
+          const endSample = Math.ceil(clip.sourceOutMs * samplesPerMs);
+          const sampleCount = endSample - startSample;
+
+          if (sampleCount > 0) {
+            const waveColor = isSilence ? THEME.accent.danger + '40' : clipColor + '50';
+            ctx.fillStyle = waveColor;
+
+            const centerY = clipY + clipH / 2;
+            const maxBarH = (clipH - 6) / 2;
+            const pixelsPerSample = clipWidth / sampleCount;
+
+            if (pixelsPerSample >= 1) {
+              // High zoom: draw individual bars
+              for (let s = 0; s < sampleCount; s++) {
+                const idx = startSample + s;
+                if (idx < 0 || idx >= waveformData.length) continue;
+                const amp = waveformData[idx];
+                const barH = Math.max(1, amp * maxBarH);
+                const bx = clipX + s * pixelsPerSample;
+                ctx.fillRect(bx, centerY - barH, Math.max(1, pixelsPerSample - 0.5), barH * 2);
+              }
+            } else {
+              // Low zoom: aggregate samples per pixel
+              const samplesPerPx = sampleCount / clipWidth;
+              for (let px = 0; px < clipWidth; px++) {
+                const sFrom = Math.floor(px * samplesPerPx);
+                const sTo = Math.ceil((px + 1) * samplesPerPx);
+                let maxAmp = 0;
+                for (let s = sFrom; s < sTo; s++) {
+                  const idx = startSample + s;
+                  if (idx >= 0 && idx < waveformData.length) {
+                    if (waveformData[idx] > maxAmp) maxAmp = waveformData[idx];
+                  }
+                }
+                const barH = Math.max(0.5, maxAmp * maxBarH);
+                ctx.fillRect(clipX + px, centerY - barH, 1, barH * 2);
+              }
+            }
+          }
+          ctx.restore();
+        }
+
         // Trim handles (visual indicators on selected clip)
         if (isSelected) {
           const handleWidth = 4;
@@ -277,6 +330,7 @@ export function Timeline() {
     effectivePps,
     mediaAssets,
     selectedClipId,
+    waveformData,
   ]);
 
   // Animation loop
