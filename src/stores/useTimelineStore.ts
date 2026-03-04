@@ -26,6 +26,8 @@ interface TimelineStore {
   removeClip: (trackId: string, clipId: string) => void;
   updateClip: (trackId: string, clipId: string, updates: Partial<TimelineClip>) => void;
   splitClipAtPlayhead: (playheadMs: number) => void;
+  markSilenceRegions: (regions: { startMs: number; endMs: number }[]) => void;
+  cutMarkedSilence: () => void;
   removeSilenceRegions: (regions: { startMs: number; endMs: number }[]) => void;
   findClipById: (clipId: string) => { track: TimelineTrack; clip: TimelineClip } | null;
   removeClipById: (clipId: string) => void;
@@ -142,6 +144,130 @@ export const useTimelineStore = create<TimelineStore>((set, get) => ({
           ? [...state._history.slice(-(MAX_HISTORY - 1)), snapshot]
           : state._history,
         _future: changed ? [] : state._future,
+      };
+    }),
+
+  markSilenceRegions: (regions) =>
+    set((state) => {
+      if (regions.length === 0) return state;
+      const snapshot = cloneTracks(state.tracks);
+      const sorted = [...regions].sort((a, b) => a.startMs - b.startMs);
+
+      const newTracks = state.tracks.map((track) => {
+        if (track.type !== 'video' && track.type !== 'audio') return track;
+
+        let currentClips = [...track.clips];
+
+        // Split clips at every silence boundary and mark the silent parts
+        for (const region of sorted) {
+          const resultClips: TimelineClip[] = [];
+
+          for (const clip of currentClips) {
+            // No overlap - keep clip as is
+            if (clip.endTimeMs <= region.startMs || clip.startTimeMs >= region.endMs) {
+              resultClips.push(clip);
+              continue;
+            }
+
+            const clipDuration = clip.endTimeMs - clip.startTimeMs;
+            const sourceDuration = clip.sourceOutMs - clip.sourceInMs;
+
+            // Part before silence (non-silent)
+            if (clip.startTimeMs < region.startMs) {
+              const ratio = (region.startMs - clip.startTimeMs) / clipDuration;
+              resultClips.push({
+                ...clip,
+                id: crypto.randomUUID(),
+                endTimeMs: region.startMs,
+                sourceOutMs: clip.sourceInMs + sourceDuration * ratio,
+                clipType: clip.clipType,
+              });
+            }
+
+            // The silent part itself - mark as silence_marker
+            const silenceStart = Math.max(clip.startTimeMs, region.startMs);
+            const silenceEnd = Math.min(clip.endTimeMs, region.endMs);
+            if (silenceEnd > silenceStart) {
+              const ratioStart = (silenceStart - clip.startTimeMs) / clipDuration;
+              const ratioEnd = (silenceEnd - clip.startTimeMs) / clipDuration;
+              resultClips.push({
+                ...clip,
+                id: crypto.randomUUID(),
+                startTimeMs: silenceStart,
+                endTimeMs: silenceEnd,
+                sourceInMs: clip.sourceInMs + sourceDuration * ratioStart,
+                sourceOutMs: clip.sourceInMs + sourceDuration * ratioEnd,
+                clipType: 'silence_marker',
+              });
+            }
+
+            // Part after silence (non-silent)
+            if (clip.endTimeMs > region.endMs) {
+              const ratioStart = (region.endMs - clip.startTimeMs) / clipDuration;
+              resultClips.push({
+                ...clip,
+                id: crypto.randomUUID(),
+                startTimeMs: region.endMs,
+                sourceInMs: clip.sourceInMs + sourceDuration * ratioStart,
+                clipType: clip.clipType,
+              });
+            }
+          }
+
+          currentClips = resultClips;
+        }
+
+        // Re-index
+        currentClips.forEach((c, i) => { c.orderIndex = i; });
+
+        return { ...track, clips: currentClips };
+      });
+
+      return {
+        tracks: newTracks,
+        _history: [...state._history.slice(-(MAX_HISTORY - 1)), snapshot],
+        _future: [],
+      };
+    }),
+
+  cutMarkedSilence: () =>
+    set((state) => {
+      const hasSilence = state.tracks.some((t) =>
+        t.clips.some((c) => c.clipType === 'silence_marker')
+      );
+      if (!hasSilence) return state;
+
+      const snapshot = cloneTracks(state.tracks);
+
+      const newTracks = state.tracks.map((track) => {
+        if (track.type !== 'video' && track.type !== 'audio') return track;
+
+        // Remove silence_marker clips and restore original clipType
+        const kept = track.clips
+          .filter((c) => c.clipType !== 'silence_marker')
+          .sort((a, b) => a.startTimeMs - b.startTimeMs);
+
+        // Compact: close gaps
+        let nextStart = 0;
+        const compacted: TimelineClip[] = [];
+        for (const clip of kept) {
+          const duration = clip.endTimeMs - clip.startTimeMs;
+          compacted.push({
+            ...clip,
+            startTimeMs: nextStart,
+            endTimeMs: nextStart + duration,
+            orderIndex: compacted.length,
+          });
+          nextStart += duration;
+        }
+
+        return { ...track, clips: compacted };
+      });
+
+      return {
+        tracks: newTracks,
+        _history: [...state._history.slice(-(MAX_HISTORY - 1)), snapshot],
+        _future: [],
       };
     }),
 

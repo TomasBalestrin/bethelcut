@@ -30,8 +30,15 @@ export async function decodeAudioFromVideo(
   videoUrl: string
 ): Promise<AudioBuffer> {
   const audioContext = new AudioContext();
+
   const response = await fetch(videoUrl);
+  if (!response.ok) {
+    throw new Error(`Erro ao baixar o vídeo: HTTP ${response.status}`);
+  }
   const arrayBuffer = await response.arrayBuffer();
+  if (arrayBuffer.byteLength === 0) {
+    throw new Error('O arquivo de vídeo está vazio');
+  }
   return audioContext.decodeAudioData(arrayBuffer);
 }
 
