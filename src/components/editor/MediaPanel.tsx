@@ -16,6 +16,7 @@ import {
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useTimelineStore } from '@/stores/useTimelineStore';
+import { SilenceCutPanel } from '@/components/silence/SilenceCutPanel';
 import { createClient } from '@/lib/supabase/client';
 import { formatFileSize, formatDuration } from '@/lib/utils';
 import type { MediaAsset } from '@/types/project';
@@ -391,13 +392,7 @@ export function MediaPanel() {
         )}
 
         {activeTab === 'silence' && (
-          <div className="text-center py-8">
-            <Scissors size={28} className="text-text-muted/40 mx-auto mb-3" />
-            <p className="text-xs text-text-secondary">Corte de Silêncio</p>
-            <p className="text-[10px] text-text-muted mt-1">
-              Importe um vídeo para detectar e remover silêncios
-            </p>
-          </div>
+          <SilenceCutPanel />
         )}
 
         {activeTab === 'effects' && (
