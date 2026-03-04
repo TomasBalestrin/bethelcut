@@ -253,7 +253,7 @@ export function useTimelineInteractions(
   );
 
   const handleMouseUp = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
+    () => {
       const drag = dragRef.current;
       if (!drag) return;
 

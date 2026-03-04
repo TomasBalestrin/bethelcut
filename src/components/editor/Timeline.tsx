@@ -18,7 +18,6 @@ export function Timeline() {
   const animFrameRef = useRef<number>(0);
 
   const currentTimeMs = useEditorStore((s) => s.currentTimeMs);
-  const setCurrentTimeMs = useEditorStore((s) => s.setCurrentTimeMs);
   const durationMs = useEditorStore((s) => s.durationMs);
   const zoom = useEditorStore((s) => s.zoom);
   const selectedClipId = useEditorStore((s) => s.selectedClipId);
