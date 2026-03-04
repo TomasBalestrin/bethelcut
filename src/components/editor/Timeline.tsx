@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useTimelineStore } from '@/stores/useTimelineStore';
+import { useTimelineInteractions } from '@/hooks/useTimelineInteractions';
 import { THEME } from '@/lib/constants';
 import { formatDuration, msToTimelinePixels } from '@/lib/utils';
 import { Lock, Eye, EyeOff, Volume2, VolumeX } from 'lucide-react';
@@ -20,6 +21,7 @@ export function Timeline() {
   const setCurrentTimeMs = useEditorStore((s) => s.setCurrentTimeMs);
   const durationMs = useEditorStore((s) => s.durationMs);
   const zoom = useEditorStore((s) => s.zoom);
+  const selectedClipId = useEditorStore((s) => s.selectedClipId);
 
   const mediaAssets = useProjectStore((s) => s.mediaAssets);
   const tracks = useTimelineStore((s) => s.tracks);
@@ -32,6 +34,19 @@ export function Timeline() {
     msToTimelinePixels(durationMs || 60000, effectivePps),
     800
   );
+
+  const {
+    handleMouseDown,
+    handleMouseMove,
+    handleMouseUp,
+    handleClick,
+    cursor,
+  } = useTimelineInteractions(canvasRef, {
+    tracks,
+    effectivePps,
+    scrollX,
+    rulerHeight: RULER_HEIGHT,
+  });
 
   const drawTimeline = useCallback(() => {
     const canvas = canvasRef.current;
@@ -129,6 +144,8 @@ export function Timeline() {
 
         if (clipX + clipWidth < 0 || clipX > width) continue;
 
+        const isSelected = clip.id === selectedClipId;
+
         // Clip colors
         let clipColor: string = THEME.timeline.clip;
         if (clip.clipType === 'audio') clipColor = THEME.timeline.audio;
@@ -136,9 +153,9 @@ export function Timeline() {
         if (clip.clipType === 'silence_marker') clipColor = THEME.timeline.silence;
 
         // Clip rect
-        ctx.fillStyle = clipColor + '25';
-        ctx.strokeStyle = clipColor + '60';
-        ctx.lineWidth = 0.5;
+        ctx.fillStyle = clipColor + (isSelected ? '40' : '25');
+        ctx.strokeStyle = isSelected ? '#ffffff80' : clipColor + '60';
+        ctx.lineWidth = isSelected ? 1.5 : 0.5;
         const clipY = trackY + 4;
         const clipH = trackHeight - 8;
         const r = 3;
@@ -157,8 +174,19 @@ export function Timeline() {
         ctx.stroke();
 
         // Clip top accent line
-        ctx.fillStyle = clipColor + '80';
-        ctx.fillRect(clipX, clipY, clipWidth, 1);
+        ctx.fillStyle = clipColor + (isSelected ? 'cc' : '80');
+        ctx.fillRect(clipX, clipY, clipWidth, isSelected ? 2 : 1);
+
+        // Trim handles (visual indicators on selected clip)
+        if (isSelected) {
+          const handleWidth = 4;
+          const handleColor = '#ffffffa0';
+          ctx.fillStyle = handleColor;
+          // Left handle
+          ctx.fillRect(clipX, clipY + clipH / 2 - 8, handleWidth, 16);
+          // Right handle
+          ctx.fillRect(clipX + clipWidth - handleWidth, clipY + clipH / 2 - 8, handleWidth, 16);
+        }
 
         // Clip label (asset filename)
         if (clipWidth > 40) {
@@ -166,7 +194,7 @@ export function Timeline() {
             ? mediaAssets.find((a) => a.id === clip.assetId)
             : null;
           const label = asset?.fileName || clip.clipType;
-          ctx.fillStyle = THEME.text.secondary;
+          ctx.fillStyle = isSelected ? THEME.text.primary : THEME.text.secondary;
           ctx.font = '9px Inter, system-ui, sans-serif';
           ctx.textAlign = 'left';
           ctx.save();
@@ -228,6 +256,7 @@ export function Timeline() {
     tracks,
     effectivePps,
     mediaAssets,
+    selectedClipId,
   ]);
 
   // Animation loop
@@ -239,19 +268,6 @@ export function Timeline() {
     animFrameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [drawTimeline]);
-
-  // Handle click on timeline to seek
-  const handleCanvasClick = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left + scrollX;
-      const timeMs = Math.max(0, Math.round((x / effectivePps) * 1000));
-      setCurrentTimeMs(timeMs);
-    },
-    [scrollX, effectivePps, setCurrentTimeMs]
-  );
 
   // Handle horizontal scroll
   const handleWheel = useCallback(
@@ -336,8 +352,13 @@ export function Timeline() {
         <div className="flex-1 overflow-hidden">
           <canvas
             ref={canvasRef}
-            className="w-full h-full cursor-pointer"
-            onClick={handleCanvasClick}
+            className="w-full h-full"
+            style={{ cursor }}
+            onClick={handleClick}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
             onWheel={handleWheel}
           />
         </div>

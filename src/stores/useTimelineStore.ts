@@ -19,6 +19,9 @@ interface TimelineStore {
   addClip: (trackId: string, clip: TimelineClip) => void;
   removeClip: (trackId: string, clipId: string) => void;
   updateClip: (trackId: string, clipId: string, updates: Partial<TimelineClip>) => void;
+  splitClipAtPlayhead: (playheadMs: number) => void;
+  findClipById: (clipId: string) => { track: TimelineTrack; clip: TimelineClip } | null;
+  removeClipById: (clipId: string) => void;
   setPixelsPerSecond: (pps: number) => void;
   setScrollX: (x: number) => void;
   setScrollY: (y: number) => void;
@@ -29,7 +32,7 @@ interface TimelineStore {
 }
 
 const initialState = {
-  tracks: [],
+  tracks: [] as TimelineTrack[],
   pixelsPerSecond: 100,
   scrollX: 0,
   scrollY: 0,
@@ -38,7 +41,7 @@ const initialState = {
   timelineHeight: 250,
 };
 
-export const useTimelineStore = create<TimelineStore>((set) => ({
+export const useTimelineStore = create<TimelineStore>((set, get) => ({
   ...initialState,
 
   setTracks: (tracks) => set({ tracks }),
@@ -80,6 +83,56 @@ export const useTimelineStore = create<TimelineStore>((set) => ({
           : t
       ),
     })),
+
+  splitClipAtPlayhead: (playheadMs) =>
+    set((state) => ({
+      tracks: state.tracks.map((track) => {
+        const clipIndex = track.clips.findIndex(
+          (c) => c.startTimeMs < playheadMs && c.endTimeMs > playheadMs
+        );
+        if (clipIndex === -1) return track;
+
+        const clip = track.clips[clipIndex];
+        const duration = clip.endTimeMs - clip.startTimeMs;
+        const sourceDuration = clip.sourceOutMs - clip.sourceInMs;
+        const splitRatio = (playheadMs - clip.startTimeMs) / duration;
+
+        const clip1: TimelineClip = {
+          ...clip,
+          endTimeMs: playheadMs,
+          sourceOutMs: clip.sourceInMs + sourceDuration * splitRatio,
+        };
+        const clip2: TimelineClip = {
+          ...clip,
+          id: crypto.randomUUID(),
+          startTimeMs: playheadMs,
+          sourceInMs: clip.sourceInMs + sourceDuration * splitRatio,
+          orderIndex: clip.orderIndex + 1,
+        };
+
+        const newClips = [...track.clips];
+        newClips.splice(clipIndex, 1, clip1, clip2);
+        return { ...track, clips: newClips };
+      }),
+    })),
+
+  findClipById: (clipId) => {
+    const state = get();
+    for (const track of state.tracks) {
+      const clip = track.clips.find((c) => c.id === clipId);
+      if (clip) return { track, clip };
+    }
+    return null;
+  },
+
+  removeClipById: (clipId) =>
+    set((state) => ({
+      tracks: state.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.filter((c) => c.id !== clipId),
+      })),
+    })),
+
   setPixelsPerSecond: (pps) => set({ pixelsPerSecond: pps }),
   setScrollX: (x) => set({ scrollX: x }),
   setScrollY: (y) => set({ scrollY: y }),
