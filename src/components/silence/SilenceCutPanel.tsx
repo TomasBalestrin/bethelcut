@@ -11,7 +11,20 @@ import { detectSilenceRegions } from '@/lib/audio/silence-detector';
 import { EDITOR_CONFIG } from '@/lib/constants';
 import { Button } from '@/components/ui/Button';
 import { formatDuration } from '@/lib/utils';
-import { Scissors, Check, X, Settings2, Volume2, Clock, Shield, Play } from 'lucide-react';
+import {
+  Scissors,
+  Check,
+  X,
+  Settings2,
+  Volume2,
+  Clock,
+  Shield,
+  Play,
+  Trash2,
+  Undo2,
+} from 'lucide-react';
+
+type Phase = 'config' | 'detected' | 'cut';
 
 export function SilenceCutPanel() {
   const {
@@ -33,14 +46,14 @@ export function SilenceCutPanel() {
 
   const mediaAssets = useProjectStore((s) => s.mediaAssets);
   const tracks = useTimelineStore((s) => s.tracks);
-  const removeSilenceRegions = useTimelineStore((s) => s.removeSilenceRegions);
+  const markSilenceRegions = useTimelineStore((s) => s.markSilenceRegions);
+  const cutMarkedSilence = useTimelineStore((s) => s.cutMarkedSilence);
+  const undo = useTimelineStore((s) => s.undo);
   const setCurrentTimeMs = useEditorStore((s) => s.setCurrentTimeMs);
-  const durationMs = useEditorStore((s) => s.durationMs);
-  const setDurationMs = useEditorStore((s) => s.setDurationMs);
 
   const [error, setError] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState(0);
-  const [cutsApplied, setCutsApplied] = useState(false);
+  const [phase, setPhase] = useState<Phase>('config');
 
   const videoAsset = mediaAssets.find((a) => a.type === 'video');
   const videoTrack = tracks.find((t) => t.type === 'video');
@@ -56,22 +69,19 @@ export function SilenceCutPanel() {
 
     setError(null);
     setIsAnalyzing(true);
-    setCutsApplied(false);
+    setPhase('config');
     setAnalysisProgress(10);
 
     try {
-      // Decode audio from video
-      setAnalysisProgress(20);
+      setAnalysisProgress(15);
       const audioBuffer = await decodeAudioFromVideo(videoAsset.fileUrl);
 
-      // Extract waveform
       setAnalysisProgress(50);
       const samplesPerSecond = EDITOR_CONFIG.WAVEFORM_SAMPLES_PER_SECOND;
       const rawData = await extractWaveformData(audioBuffer, samplesPerSecond);
       const normalized = normalizeWaveform(rawData);
       setWaveformData(normalized);
 
-      // Detect silence
       setAnalysisProgress(80);
       const regions = detectSilenceRegions(normalized, samplesPerSecond, {
         thresholdDb,
@@ -81,37 +91,45 @@ export function SilenceCutPanel() {
       });
 
       // Store with accepted=true by default
-      setSilenceRegions(
-        regions.map((r) => ({ ...r, accepted: true }))
-      );
+      const withAccepted = regions.map((r) => ({ ...r, accepted: true }));
+      setSilenceRegions(withAccepted);
+
+      // Mark silence regions on the timeline (split clips at boundaries)
+      if (regions.length > 0) {
+        markSilenceRegions(regions.map((r) => ({ startMs: r.startMs, endMs: r.endMs })));
+      }
 
       setAnalysisProgress(100);
+      setPhase('detected');
     } catch (err) {
+      console.error('Silence detection error:', err);
       setError(
-        err instanceof Error ? err.message : 'Erro ao analisar o áudio'
+        err instanceof Error ? err.message : 'Erro ao analisar o áudio. Verifique se o vídeo possui áudio.'
       );
     } finally {
       setIsAnalyzing(false);
       setAnalysisProgress(0);
     }
-  }, [videoAsset, thresholdDb, minDurationMs, paddingMs, setIsAnalyzing, setWaveformData, setSilenceRegions]);
+  }, [videoAsset, thresholdDb, minDurationMs, paddingMs, setIsAnalyzing, setWaveformData, setSilenceRegions, markSilenceRegions]);
 
-  const handleApplyCuts = useCallback(() => {
-    const accepted = silenceRegions.filter((r) => r.accepted);
-    if (accepted.length === 0) return;
-
-    removeSilenceRegions(accepted.map((r) => ({ startMs: r.startMs, endMs: r.endMs })));
-
-    // Update duration after cutting
-    const newDuration = durationMs - totalSilenceMs;
-    if (newDuration > 0) {
-      setDurationMs(newDuration);
-    }
-
-    // Move playhead to start
+  const handleCut = useCallback(() => {
+    cutMarkedSilence();
     setCurrentTimeMs(0);
-    setCutsApplied(true);
-  }, [silenceRegions, removeSilenceRegions, durationMs, totalSilenceMs, setDurationMs, setCurrentTimeMs]);
+    setPhase('cut');
+  }, [cutMarkedSilence, setCurrentTimeMs]);
+
+  const handleUndo = useCallback(() => {
+    undo();
+    setPhase('config');
+    setSilenceRegions([]);
+  }, [undo, setSilenceRegions]);
+
+  const handleRedetect = useCallback(() => {
+    // Undo the marks first, then allow redetect
+    undo();
+    setPhase('config');
+    setSilenceRegions([]);
+  }, [undo, setSilenceRegions]);
 
   const handlePreviewRegion = useCallback((startMs: number) => {
     setCurrentTimeMs(Math.max(0, startMs - 500));
@@ -156,6 +174,7 @@ export function SilenceCutPanel() {
             value={thresholdDb}
             onChange={(e) => setThresholdDb(Number(e.target.value))}
             className="w-full"
+            disabled={phase !== 'config'}
           />
           <div className="flex justify-between text-[9px] text-text-muted mt-0.5">
             <span>-60 dB (mais sensível)</span>
@@ -176,6 +195,7 @@ export function SilenceCutPanel() {
             value={minDurationMs}
             onChange={(e) => setMinDurationMs(Number(e.target.value))}
             className="w-full"
+            disabled={phase !== 'config'}
           />
           <div className="flex justify-between text-[9px] text-text-muted mt-0.5">
             <span>100ms</span>
@@ -196,6 +216,7 @@ export function SilenceCutPanel() {
             value={paddingMs}
             onChange={(e) => setPaddingMs(Number(e.target.value))}
             className="w-full"
+            disabled={phase !== 'config'}
           />
           <div className="flex justify-between text-[9px] text-text-muted mt-0.5">
             <span>0ms</span>
@@ -204,24 +225,37 @@ export function SilenceCutPanel() {
         </div>
       </div>
 
-      {/* Analyze Button */}
-      <Button
-        className="w-full"
-        size="sm"
-        isLoading={isAnalyzing}
-        onClick={handleDetect}
-      >
-        <Scissors size={14} />
-        {isAnalyzing ? 'Analisando...' : 'Detectar Silêncios'}
-      </Button>
+      {/* Phase: Config - Detect button */}
+      {phase === 'config' && (
+        <Button
+          className="w-full"
+          size="sm"
+          isLoading={isAnalyzing}
+          onClick={handleDetect}
+        >
+          <Scissors size={14} />
+          {isAnalyzing ? 'Analisando áudio...' : 'Detectar Silêncios'}
+        </Button>
+      )}
 
       {/* Progress */}
       {isAnalyzing && analysisProgress > 0 && (
-        <div className="w-full h-1 bg-bg-surface rounded-full overflow-hidden">
-          <div
-            className="h-full bg-accent-primary rounded-full transition-all duration-300"
-            style={{ width: `${analysisProgress}%` }}
-          />
+        <div className="space-y-1">
+          <div className="w-full h-1.5 bg-bg-surface rounded-full overflow-hidden">
+            <div
+              className="h-full bg-accent-primary rounded-full transition-all duration-500"
+              style={{ width: `${analysisProgress}%` }}
+            />
+          </div>
+          <p className="text-[10px] text-text-muted text-center">
+            {analysisProgress < 20
+              ? 'Iniciando análise...'
+              : analysisProgress < 50
+              ? 'Decodificando áudio do vídeo...'
+              : analysisProgress < 80
+              ? 'Extraindo waveform...'
+              : 'Detectando silêncios...'}
+          </p>
         </div>
       )}
 
@@ -229,22 +263,30 @@ export function SilenceCutPanel() {
       {error && (
         <div className="p-2 rounded-md bg-accent-danger/10 border border-accent-danger/20">
           <p className="text-xs text-accent-danger">{error}</p>
+          <button
+            onClick={() => setError(null)}
+            className="text-[10px] text-accent-danger/70 hover:underline mt-1"
+          >
+            Fechar
+          </button>
         </div>
       )}
 
-      {/* Results */}
-      {silenceRegions.length > 0 && (
+      {/* Phase: Detected - show regions + CUT button */}
+      {phase === 'detected' && silenceRegions.length > 0 && (
         <div className="space-y-2">
           {/* Summary */}
-          <div className="p-2 rounded-md bg-bg-surface border border-border-default/40">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-text-secondary">
-                {silenceRegions.length} silêncios encontrados
-              </span>
-              <span className="text-text-muted font-mono">
-                {formatDuration(totalSilenceMs)} para cortar
-              </span>
-            </div>
+          <div className="p-2.5 rounded-md bg-accent-warning/8 border border-accent-warning/15">
+            <p className="text-xs text-text-secondary font-medium mb-1">
+              {silenceRegions.length} silêncios detectados
+            </p>
+            <p className="text-[10px] text-text-muted">
+              Os trechos silenciosos estão marcados em vermelho na timeline.
+              Revise e clique em <strong>CUT</strong> para removê-los.
+            </p>
+            <p className="text-[10px] text-text-muted font-mono mt-1">
+              Total: {formatDuration(totalSilenceMs)} de silêncio
+            </p>
           </div>
 
           {/* Accept/Reject All */}
@@ -257,47 +299,41 @@ export function SilenceCutPanel() {
                 onClick={acceptAllRegions}
                 className="text-[10px] text-accent-success hover:underline"
               >
-                Selecionar todos
+                Todos
               </button>
               <span className="text-text-muted text-[10px]">|</span>
               <button
                 onClick={rejectAllRegions}
                 className="text-[10px] text-accent-danger hover:underline"
               >
-                Desmarcar todos
+                Nenhum
               </button>
             </div>
           </div>
 
           {/* Region List */}
-          <div className="max-h-48 overflow-y-auto space-y-1">
+          <div className="max-h-40 overflow-y-auto space-y-1">
             {silenceRegions.map((region, i) => (
               <div
                 key={i}
-                className={`flex items-center gap-2 p-2 rounded-md text-xs transition-colors ${
+                className={`flex items-center gap-1.5 p-1.5 rounded-md text-[11px] transition-colors ${
                   region.accepted
                     ? 'bg-accent-danger/8 border border-accent-danger/15'
-                    : 'bg-bg-surface border border-border-default/40'
+                    : 'bg-bg-surface border border-border-default/40 opacity-50'
                 }`}
               >
                 <button
                   onClick={() => toggleSilenceRegion(i)}
                   className={`p-0.5 rounded flex-shrink-0 ${
-                    region.accepted
-                      ? 'text-accent-danger'
-                      : 'text-text-muted'
+                    region.accepted ? 'text-accent-danger' : 'text-text-muted'
                   }`}
                 >
-                  {region.accepted ? (
-                    <Check size={14} />
-                  ) : (
-                    <X size={14} />
-                  )}
+                  {region.accepted ? <Check size={12} /> : <X size={12} />}
                 </button>
                 <span className="font-mono text-text-muted flex-1">
                   {formatDuration(region.startMs)} - {formatDuration(region.endMs)}
                 </span>
-                <span className="text-text-muted/60 font-mono text-[10px]">
+                <span className="text-text-muted/60 font-mono text-[9px]">
                   {((region.endMs - region.startMs) / 1000).toFixed(1)}s
                 </span>
                 <button
@@ -305,37 +341,94 @@ export function SilenceCutPanel() {
                   className="p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-secondary flex-shrink-0"
                   title="Pré-visualizar"
                 >
-                  <Play size={11} />
+                  <Play size={10} />
                 </button>
               </div>
             ))}
           </div>
 
-          {/* Apply Button */}
-          {!cutsApplied ? (
+          {/* Action buttons */}
+          <div className="space-y-1.5">
             <Button
               className="w-full"
               size="sm"
               variant="danger"
               disabled={acceptedCount === 0}
-              onClick={handleApplyCuts}
+              onClick={handleCut}
             >
-              <Scissors size={14} />
-              Aplicar Cortes ({acceptedCount})
+              <Trash2 size={14} />
+              CUT - Remover Silêncios ({acceptedCount})
             </Button>
-          ) : (
-            <div className="p-2 rounded-md bg-accent-success/10 border border-accent-success/20 text-center">
-              <p className="text-xs text-accent-success">
-                Cortes aplicados! Use Ctrl+Z para desfazer.
-              </p>
-            </div>
-          )}
+
+            <button
+              onClick={handleRedetect}
+              className="w-full text-[10px] text-text-muted hover:text-text-secondary py-1 hover:underline"
+            >
+              Alterar configurações e re-detectar
+            </button>
+          </div>
         </div>
       )}
 
-      {silenceRegions.length === 0 && !isAnalyzing && !error && (
-        <p className="text-center text-[10px] text-text-muted py-2">
-          Clique em &quot;Detectar Silêncios&quot; para analisar o áudio
+      {/* Phase: Detected - no silence found */}
+      {phase === 'detected' && silenceRegions.length === 0 && (
+        <div className="p-2.5 rounded-md bg-accent-success/8 border border-accent-success/15 text-center">
+          <p className="text-xs text-accent-success">Nenhum silêncio detectado!</p>
+          <p className="text-[10px] text-text-muted mt-1">
+            Tente diminuir o threshold para detectar mais.
+          </p>
+          <button
+            onClick={() => setPhase('config')}
+            className="text-[10px] text-accent-primary hover:underline mt-2"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {/* Phase: Cut - done */}
+      {phase === 'cut' && (
+        <div className="space-y-2">
+          <div className="p-2.5 rounded-md bg-accent-success/10 border border-accent-success/20 text-center">
+            <p className="text-xs text-accent-success font-medium">
+              Cortes aplicados com sucesso!
+            </p>
+            <p className="text-[10px] text-text-muted mt-1">
+              {acceptedCount} trechos silenciosos removidos ({formatDuration(totalSilenceMs)})
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              className="flex-1"
+              size="sm"
+              variant="secondary"
+              onClick={handleUndo}
+            >
+              <Undo2 size={13} />
+              Desfazer
+            </Button>
+            <Button
+              className="flex-1"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setPhase('config');
+                setSilenceRegions([]);
+              }}
+            >
+              Novo corte
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Initial hint */}
+      {phase === 'config' && silenceRegions.length === 0 && !isAnalyzing && !error && (
+        <p className="text-center text-[10px] text-text-muted py-1 leading-relaxed">
+          Analisa o áudio do vídeo e detecta trechos silenciosos
+          abaixo de <strong>{thresholdDb} dB</strong>. Os silêncios serão
+          marcados na timeline para você revisar antes de cortar.
         </p>
       )}
     </div>

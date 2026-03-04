@@ -146,13 +146,16 @@ export function Timeline() {
         const isSelected = clip.id === selectedClipId;
 
         // Clip colors
+        const isSilence = clip.clipType === 'silence_marker';
         let clipColor: string = THEME.timeline.clip;
         if (clip.clipType === 'audio') clipColor = THEME.timeline.audio;
         if (clip.clipType === 'caption') clipColor = THEME.timeline.caption;
-        if (clip.clipType === 'silence_marker') clipColor = THEME.timeline.silence;
+        if (isSilence) clipColor = THEME.accent.danger;
 
         // Clip rect
-        ctx.fillStyle = clipColor + (isSelected ? '40' : '25');
+        ctx.fillStyle = isSilence
+          ? clipColor + '30'
+          : clipColor + (isSelected ? '40' : '25');
         ctx.strokeStyle = isSelected ? '#ffffff80' : clipColor + '60';
         ctx.lineWidth = isSelected ? 1.5 : 0.5;
         const clipY = trackY + 4;
@@ -187,12 +190,30 @@ export function Timeline() {
           ctx.fillRect(clipX + clipWidth - handleWidth, clipY + clipH / 2 - 8, handleWidth, 16);
         }
 
+        // Silence marker: draw diagonal stripe pattern
+        if (isSilence && clipWidth > 4) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(clipX, clipY, clipWidth, clipH);
+          ctx.clip();
+          ctx.strokeStyle = clipColor + '25';
+          ctx.lineWidth = 1;
+          const step = 8;
+          for (let sx = clipX - clipH; sx < clipX + clipWidth; sx += step) {
+            ctx.beginPath();
+            ctx.moveTo(sx, clipY + clipH);
+            ctx.lineTo(sx + clipH, clipY);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+
         // Clip label (asset filename)
         if (clipWidth > 40) {
           const asset = clip.assetId
             ? mediaAssets.find((a) => a.id === clip.assetId)
             : null;
-          const label = asset?.fileName || clip.clipType;
+          const label = isSilence ? 'Silêncio' : (asset?.fileName || clip.clipType);
           ctx.fillStyle = isSelected ? THEME.text.primary : THEME.text.secondary;
           ctx.font = '9px Inter, system-ui, sans-serif';
           ctx.textAlign = 'left';
