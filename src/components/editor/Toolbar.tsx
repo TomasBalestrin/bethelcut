@@ -42,10 +42,12 @@ export function Toolbar() {
   const toggleMagnet = useTimelineStore((s) => s.toggleMagnet);
   const splitClipAtPlayhead = useTimelineStore((s) => s.splitClipAtPlayhead);
   const removeClipById = useTimelineStore((s) => s.removeClipById);
+  const undo = useTimelineStore((s) => s.undo);
+  const redo = useTimelineStore((s) => s.redo);
 
   const toolbarButtons = [
-    { icon: Undo2, label: 'Desfazer (Ctrl+Z)', action: () => {} },
-    { icon: Redo2, label: 'Refazer (Ctrl+Shift+Z)', action: () => {} },
+    { icon: Undo2, label: 'Desfazer (Ctrl+Z)', action: () => undo() },
+    { icon: Redo2, label: 'Refazer (Ctrl+Shift+Z)', action: () => redo() },
     { divider: true },
     { icon: Scissors, label: 'Cortar (B)', action: () => splitClipAtPlayhead(currentTimeMs) },
     {

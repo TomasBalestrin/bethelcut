@@ -14,6 +14,8 @@ export function useKeyboardShortcuts() {
 
   const splitClipAtPlayhead = useTimelineStore((s) => s.splitClipAtPlayhead);
   const removeClipById = useTimelineStore((s) => s.removeClipById);
+  const undo = useTimelineStore((s) => s.undo);
+  const redo = useTimelineStore((s) => s.redo);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -50,10 +52,16 @@ export function useKeyboardShortcuts() {
         case 'z':
           if (isCtrl && e.shiftKey) {
             e.preventDefault();
-            // Redo - future implementation
+            redo();
           } else if (isCtrl) {
             e.preventDefault();
-            // Undo - future implementation
+            undo();
+          }
+          break;
+        case 'y':
+          if (isCtrl) {
+            e.preventDefault();
+            redo();
           }
           break;
         case 's':
@@ -87,6 +95,8 @@ export function useKeyboardShortcuts() {
     setSelectedClipId,
     splitClipAtPlayhead,
     removeClipById,
+    undo,
+    redo,
     zoom,
     setZoom,
   ]);
