@@ -36,7 +36,9 @@ import {
   classifyAllRegions,
   detectFillerWords,
   mergeAdjacentRegions,
+  learnSpeakerRhythm,
   type ClassifiedRegion,
+  type AdaptiveConfig,
 } from '@/lib/audio/noise-classifier';
 import { EDITOR_CONFIG } from '@/lib/constants';
 import { formatDuration } from '@/lib/utils';
@@ -97,14 +99,56 @@ export function AICutPanel() {
   const noiseRegions = cutRegions.filter((r) => r.type === 'noise');
   const fillerRegions = cutRegions.filter((r) => r.type === 'filler');
 
-  const getAggressivenessConfig = useCallback(() => {
+  const getAggressivenessConfig = useCallback((): {
+    minSilenceMs: number;
+    minNoiseMs: number;
+    paddingMs: number;
+    includeFillers: boolean;
+    adaptive: AdaptiveConfig;
+  } => {
     switch (aggressiveness) {
       case 'conservative':
-        return { minSilenceMs: 800, minNoiseMs: 500, paddingMs: 200, includeFillers: false };
+        return {
+          minSilenceMs: 800,
+          minNoiseMs: 500,
+          paddingMs: 200,
+          includeFillers: false,
+          adaptive: {
+            naturalPauseKeepRatio: 1.0,     // keep 100% of natural pause
+            cutThresholdPercentile: 'p90',   // only cut pauses exceeding 90th percentile
+            minCutMs: 300,
+            includeNoise: false,
+            includeFillers: false,
+          },
+        };
       case 'balanced':
-        return { minSilenceMs: 400, minNoiseMs: 300, paddingMs: 120, includeFillers: true };
+        return {
+          minSilenceMs: 400,
+          minNoiseMs: 300,
+          paddingMs: 120,
+          includeFillers: true,
+          adaptive: {
+            naturalPauseKeepRatio: 0.6,     // keep 60% of natural pause
+            cutThresholdPercentile: 'p75',   // cut pauses exceeding 75th percentile
+            minCutMs: 150,
+            includeNoise: true,
+            includeFillers: true,
+          },
+        };
       case 'aggressive':
-        return { minSilenceMs: 200, minNoiseMs: 150, paddingMs: 60, includeFillers: true };
+        return {
+          minSilenceMs: 200,
+          minNoiseMs: 150,
+          paddingMs: 60,
+          includeFillers: true,
+          adaptive: {
+            naturalPauseKeepRatio: 0.3,     // keep 30% of natural pause
+            cutThresholdPercentile: 'median', // cut pauses exceeding median
+            minCutMs: 80,
+            includeNoise: true,
+            includeFillers: true,
+          },
+        };
     }
   }, [aggressiveness]);
 
@@ -189,7 +233,7 @@ export function AICutPanel() {
 
       // ── Step 5: Map Speech Regions (PROTECTED) ──
       setProgressMsg('Mapeando regiões de fala protegidas...');
-      setProgressPercent(60);
+      setProgressPercent(58);
       const speechRegions = mapSpeechRegions(words, config.paddingMs);
 
       // Calculate speech duration
@@ -199,13 +243,18 @@ export function AICutPanel() {
       }
       speechDurationMs = Math.min(speechDurationMs, totalDurationMs);
 
-      // ── Step 6: Extract Candidate Zones ──
+      // ── Step 6: Learn Speaker Rhythm ──
+      setProgressMsg('Aprendendo ritmo natural do speaker...');
+      setProgressPercent(62);
+      const rhythm = learnSpeakerRhythm(words, normalized, samplesPerSecond);
+
+      // ── Step 7: Extract Candidate Zones ──
       setProgressMsg('Identificando zonas candidatas...');
-      setProgressPercent(65);
+      setProgressPercent(66);
       const candidates = extractCandidateZones(speechRegions, totalDurationMs);
 
-      // ── Step 7: Classify All Candidate Zones ──
-      setProgressMsg('Classificando silêncios e ruídos...');
+      // ── Step 8: Classify All Candidate Zones (Adaptive) ──
+      setProgressMsg('Classificando silêncios e ruídos (adaptativo)...');
       setProgressPercent(70);
 
       const classified = classifyAllRegions(
@@ -214,10 +263,12 @@ export function AICutPanel() {
         samplesPerSecond,
         profile,
         config.minSilenceMs,
-        config.minNoiseMs
+        config.minNoiseMs,
+        rhythm,
+        config.adaptive
       );
 
-      // ── Step 8: Detect Filler Words ──
+      // ── Step 9: Detect Filler Words ──
       setProgressMsg('Detectando filler words...');
       setProgressPercent(85);
 
@@ -228,7 +279,7 @@ export function AICutPanel() {
         allRegions = [...allRegions, ...fillers];
       }
 
-      // ── Step 9: Merge and Finalize ──
+      // ── Step 10: Merge and Finalize ──
       setProgressMsg('Gerando cortes otimizados...');
       setProgressPercent(90);
 
@@ -351,10 +402,9 @@ export function AICutPanel() {
       {phase === 'idle' && (
         <>
           <p className="text-[10px] text-text-muted leading-relaxed">
-            A IA transcreve o vídeo, mapeia toda a fala como{' '}
-            <strong>conteúdo protegido</strong>, e identifica <strong>silêncios</strong>{' '}
-            e <strong>ruídos ambientais</strong> (motor, latido, vento) para remoção.
-            Nenhum conteúdo falado é removido.
+            A IA transcreve o vídeo, <strong>aprende o ritmo natural do speaker</strong>,
+            e identifica <strong>silêncios</strong> e <strong>ruídos</strong> para remoção.
+            Preserva pausas naturais para manter a <strong>harmonia</strong> do corte.
           </p>
 
           {/* Aggressiveness */}
@@ -382,11 +432,11 @@ export function AICutPanel() {
             </div>
             <p className="text-[9px] text-text-muted">
               {aggressiveness === 'conservative' &&
-                'Remove silêncios >800ms e ruídos >500ms. Padding amplo (200ms). Mais seguro.'}
+                'Mantém 100% das pausas naturais. Só corta silêncios muito longos (>P90). Máxima harmonia.'}
               {aggressiveness === 'balanced' &&
-                'Remove silêncios >400ms, ruídos >300ms e fillers. Recomendado.'}
+                'Mantém 60% das pausas naturais. Corta excessos além do P75. Harmonia + eficiência.'}
               {aggressiveness === 'aggressive' &&
-                'Remove gaps >200ms, ruídos >150ms e fillers. Ritmo rápido.'}
+                'Mantém 30% das pausas. Corta excessos além da mediana. Ritmo rápido mas fluido.'}
             </p>
           </div>
 
@@ -397,20 +447,24 @@ export function AICutPanel() {
               <span>Transcrição completa com Whisper (word-level)</span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
+              <Mic size={10} className="text-accent-primary flex-shrink-0" />
+              <span>Aprendizado do ritmo natural do speaker</span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-text-secondary">
               <Shield size={10} className="text-accent-success flex-shrink-0" />
-              <span>Proteção de fala — conteúdo nunca é cortado</span>
+              <span>Proteção de fala + pausas naturais preservadas</span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
               <VolumeX size={10} className="text-accent-danger flex-shrink-0" />
-              <span>Detecção de silêncios entre falas</span>
+              <span>Detecção adaptativa de silêncios (dB + frequência)</span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
               <AlertTriangle size={10} className="text-accent-warning flex-shrink-0" />
-              <span>Detecção de ruídos ambientais (motor, latido, vento)</span>
+              <span>Classificação de ruídos (motor, latido, vento)</span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
               <MessageCircle size={10} className="text-accent-warning flex-shrink-0" />
-              <span>Remoção de filler words (é, hm, tipo, né...)</span>
+              <span>Corte harm&ocirc;nico &mdash; sem efeito de &ldquo;picotado&rdquo;</span>
             </div>
           </div>
 
@@ -441,10 +495,11 @@ export function AICutPanel() {
           <div className="space-y-1 text-[9px] text-text-muted">
             <StepIndicator done={progressPercent >= 10} label="Decodificar áudio" />
             <StepIndicator done={progressPercent >= 50} label="Transcrever com Whisper" />
-            <StepIndicator done={progressPercent >= 60} label="Mapear regiões de fala" />
-            <StepIndicator done={progressPercent >= 70} label="Classificar silêncios e ruídos" />
+            <StepIndicator done={progressPercent >= 58} label="Mapear regiões de fala" />
+            <StepIndicator done={progressPercent >= 62} label="Aprender ritmo do speaker" />
+            <StepIndicator done={progressPercent >= 70} label="Classificar silêncios e ruídos (adaptativo)" />
             <StepIndicator done={progressPercent >= 85} label="Detectar filler words" />
-            <StepIndicator done={progressPercent >= 95} label="Gerar cortes otimizados" />
+            <StepIndicator done={progressPercent >= 95} label="Gerar cortes harmônicos" />
           </div>
         </div>
       )}
