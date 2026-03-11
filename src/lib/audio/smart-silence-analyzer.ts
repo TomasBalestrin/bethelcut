@@ -94,7 +94,6 @@ export function analyzeAudioProfile(
   let inSpeech = false;
   let speechSegmentCount = 0;
   let totalSpeechDuration = 0;
-  let totalSilenceDuration = 0;
   let segmentStart = 0;
   const speechDurations: number[] = [];
   const silenceDurations: number[] = [];
@@ -109,7 +108,6 @@ export function analyzeAudioProfile(
         if (speechSegmentCount > 0) {
           const silDuration = currentMs - segmentStart;
           silenceDurations.push(silDuration);
-          totalSilenceDuration += silDuration;
         }
         inSpeech = true;
         segmentStart = currentMs;
@@ -135,7 +133,6 @@ export function analyzeAudioProfile(
   } else if (speechSegmentCount > 0) {
     const silDuration = totalDurationMs - segmentStart;
     silenceDurations.push(silDuration);
-    totalSilenceDuration += silDuration;
   }
 
   // Calculate average speech pace (average duration of speech segments)

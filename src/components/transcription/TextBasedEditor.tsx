@@ -10,7 +10,6 @@ import {
   AlertCircle,
   Filter,
   Clock,
-  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useTranscriptionStore } from '@/stores/useTranscriptionStore';
