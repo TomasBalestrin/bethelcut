@@ -10,12 +10,15 @@ import {
   Undo2,
   Loader2,
   Wand2,
-  Volume2,
+  VolumeX,
   Subtitles,
   Zap,
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  MessageCircle,
+  Shield,
+  Mic,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useProjectStore } from '@/stores/useProjectStore';
@@ -26,24 +29,36 @@ import { useTranscriptionStore } from '@/stores/useTranscriptionStore';
 import { decodeAudioFromVideo, extractWaveformData } from '@/lib/audio/waveform';
 import { normalizeWaveform } from '@/lib/audio/audio-utils';
 import { encodeAudioBufferToWav } from '@/lib/audio/wav-encoder';
+import { analyzeAudioProfile } from '@/lib/audio/smart-silence-analyzer';
 import {
-  analyzeAudioProfile,
-  detectSilenceFromWaveform,
-  refineWithTranscription,
-  type SmartSilenceRegion,
-} from '@/lib/audio/smart-silence-analyzer';
+  mapSpeechRegions,
+  extractCandidateZones,
+  classifyAllRegions,
+  detectFillerWords,
+  mergeAdjacentRegions,
+  type ClassifiedRegion,
+} from '@/lib/audio/noise-classifier';
 import { EDITOR_CONFIG } from '@/lib/constants';
 import { formatDuration } from '@/lib/utils';
 
-type Phase = 'idle' | 'analyzing' | 'review' | 'cut';
+type Phase = 'idle' | 'analyzing' | 'review' | 'cut' | 'done';
 
-interface AICutRegion {
-  startMs: number;
-  endMs: number;
-  durationMs: number;
-  type: 'silence' | 'gap' | 'filler';
+interface AICutRegion extends ClassifiedRegion {
   accepted: boolean;
-  label: string;
+}
+
+interface AnalysisStats {
+  totalDurationMs: number;
+  speechDurationMs: number;
+  speechPercentage: number;
+  silenceCount: number;
+  silenceTotalMs: number;
+  noiseCount: number;
+  noiseTotalMs: number;
+  fillerCount: number;
+  fillerTotalMs: number;
+  totalRemovableMs: number;
+  wordsDetected: number;
 }
 
 export function AICutPanel() {
@@ -60,17 +75,13 @@ export function AICutPanel() {
   const [progressMsg, setProgressMsg] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const [cutRegions, setCutRegions] = useState<AICutRegion[]>([]);
-  const [showDetails, setShowDetails] = useState(false);
-  const [analysisResult, setAnalysisResult] = useState<{
-    totalSilenceMs: number;
-    totalGapMs: number;
-    totalFillerMs: number;
-    speechPercentage: number;
-    regionsCount: number;
-    usedTranscription: boolean;
-  } | null>(null);
+  const [stats, setStats] = useState<AnalysisStats | null>(null);
+
+  // UI state
+  const [showSilences, setShowSilences] = useState(false);
+  const [showNoises, setShowNoises] = useState(false);
+  const [showFillers, setShowFillers] = useState(false);
 
   // Aggressiveness setting
   const [aggressiveness, setAggressiveness] = useState<'conservative' | 'balanced' | 'aggressive'>('balanced');
@@ -82,148 +93,173 @@ export function AICutPanel() {
   const acceptedRegions = cutRegions.filter((r) => r.accepted);
   const totalCutMs = acceptedRegions.reduce((sum, r) => sum + r.durationMs, 0);
 
+  const silenceRegions = cutRegions.filter((r) => r.type === 'silence');
+  const noiseRegions = cutRegions.filter((r) => r.type === 'noise');
+  const fillerRegions = cutRegions.filter((r) => r.type === 'filler');
+
   const getAggressivenessConfig = useCallback(() => {
     switch (aggressiveness) {
       case 'conservative':
-        return { minDurationMs: 800, paddingMs: 150, includeFillers: false, thresholdOffset: 5 };
+        return { minSilenceMs: 800, minNoiseMs: 500, paddingMs: 200, includeFillers: false };
       case 'balanced':
-        return { minDurationMs: 400, paddingMs: 100, includeFillers: true, thresholdOffset: 0 };
+        return { minSilenceMs: 400, minNoiseMs: 300, paddingMs: 120, includeFillers: true };
       case 'aggressive':
-        return { minDurationMs: 200, paddingMs: 50, includeFillers: true, thresholdOffset: -5 };
+        return { minSilenceMs: 200, minNoiseMs: 150, paddingMs: 60, includeFillers: true };
     }
   }, [aggressiveness]);
+
+  // ─── Main Analysis Pipeline ──────────────────────────────
 
   const handleAnalyze = useCallback(async () => {
     if (!videoAsset || !currentProject) return;
 
     setError(null);
-    setWarning(null);
     setPhase('analyzing');
     setProgressPercent(0);
     setCutRegions([]);
+    setStats(null);
 
     const config = getAggressivenessConfig();
 
     try {
-      // Step 1: Decode audio
+      // ── Step 1: Decode Audio ──
       setProgressMsg('Decodificando áudio do vídeo...');
       setProgressPercent(5);
       const audioBuffer = await decodeAudioFromVideo(videoAsset.fileUrl);
 
-      // Step 2: Extract waveform
+      // ── Step 2: Extract Waveform ──
       setProgressMsg('Extraindo waveform...');
-      setProgressPercent(15);
+      setProgressPercent(10);
       const samplesPerSecond = EDITOR_CONFIG.WAVEFORM_SAMPLES_PER_SECOND;
       const rawData = await extractWaveformData(audioBuffer, samplesPerSecond);
       const normalized = normalizeWaveform(rawData);
       setWaveformData(normalized);
 
-      // Step 3: Analyze audio profile
-      setProgressMsg('Analisando perfil de áudio...');
-      setProgressPercent(25);
-      const profile = analyzeAudioProfile(normalized, samplesPerSecond);
-
-      // Adjust threshold based on aggressiveness
-      const effectiveThreshold = profile.recommendedThresholdDb + config.thresholdOffset;
-
-      // Step 4: PRIMARY — Detect silence from waveform (dB-based, always works)
-      setProgressMsg('Detectando silêncios no áudio...');
-      setProgressPercent(40);
-
-      let silenceRegions: SmartSilenceRegion[] = detectSilenceFromWaveform(
-        normalized,
-        samplesPerSecond,
-        effectiveThreshold,
-        config.minDurationMs,
-        config.paddingMs
-      );
-
-      // Step 5: OPTIONAL — Try to enhance with Whisper transcription
-      let usedTranscription = false;
+      // ── Step 3: Transcribe with Whisper (REQUIRED) ──
       setProgressMsg('Transcrevendo áudio com IA (Whisper)...');
-      setProgressPercent(55);
+      setProgressPercent(15);
 
-      try {
-        const wavBlob = encodeAudioBufferToWav(audioBuffer);
-        const formData = new FormData();
-        formData.append('audio', wavBlob, 'audio.wav');
-        formData.append('assetId', videoAsset.id);
-        formData.append('projectId', currentProject.id);
-        formData.append('language', 'pt');
+      const wavBlob = encodeAudioBufferToWav(audioBuffer);
+      const formData = new FormData();
+      formData.append('audio', wavBlob, 'audio.wav');
+      formData.append('assetId', videoAsset.id);
+      formData.append('projectId', currentProject.id);
+      formData.append('language', 'pt');
 
-        const response = await fetch('/api/transcription', {
-          method: 'POST',
-          body: formData,
-        });
+      const response = await fetch('/api/transcription', {
+        method: 'POST',
+        body: formData,
+      });
 
-        if (response.ok) {
-          const data = await response.json();
-          const words = data.transcription.words as { word: string; startMs: number; endMs: number }[];
+      if (!response.ok) {
+        const errData = await response.json().catch(() => null);
+        const errMsg = errData?.error || `HTTP ${response.status}`;
 
-          // Store transcription for TextBasedEditor too
-          useTranscriptionStore.getState().setTranscription({
-            id: data.transcription.id,
-            fullText: data.transcription.fullText,
-            words: data.transcription.words,
-            segments: data.transcription.segments,
-          });
-
-          // Refine silence regions with word boundaries + detect fillers
-          setProgressMsg('Refinando cortes com transcrição...');
-          setProgressPercent(80);
-
-          silenceRegions = refineWithTranscription(
-            silenceRegions,
-            words,
-            config.paddingMs,
-            config.includeFillers
+        if (response.status === 401 || errMsg.includes('API key') || errMsg.includes('Incorrect')) {
+          throw new Error(
+            'API key da OpenAI inválida ou não configurada. ' +
+            'Configure a variável OPENAI_API_KEY nas Environment Variables da Vercel.'
           );
-
-          usedTranscription = true;
-        } else {
-          // Whisper failed — continue with dB-only results
-          const errData = await response.json().catch(() => null);
-          const errMsg = errData?.error || `HTTP ${response.status}`;
-          setWarning(`Transcrição indisponível (${errMsg}). Cortes baseados apenas em análise de áudio (dB).`);
         }
-      } catch (transcriptionErr) {
-        // Network or other error — continue with dB-only
-        setWarning('Transcrição falhou. Cortes baseados apenas em análise de áudio (dB).');
-        console.warn('Transcription enhancement failed:', transcriptionErr);
+        throw new Error(`Erro na transcrição: ${errMsg}`);
       }
 
-      // Step 6: Convert to AICutRegion format
-      setProgressMsg('Finalizando regiões de corte...');
+      const data = await response.json();
+      const words = data.transcription.words as { word: string; startMs: number; endMs: number }[];
+
+      if (words.length === 0) {
+        throw new Error('Nenhuma fala detectada no vídeo. O AI CUT precisa de conteúdo falado para funcionar.');
+      }
+
+      // Store transcription for TextBasedEditor
+      useTranscriptionStore.getState().setTranscription({
+        id: data.transcription.id,
+        fullText: data.transcription.fullText,
+        words: data.transcription.words,
+        segments: data.transcription.segments,
+      });
+
+      setProgressPercent(50);
+
+      // ── Step 4: Analyze Audio Profile ──
+      setProgressMsg('Analisando perfil de áudio...');
+      setProgressPercent(55);
+      const profile = analyzeAudioProfile(normalized, samplesPerSecond);
+      const totalDurationMs = profile.totalDurationMs;
+
+      // ── Step 5: Map Speech Regions (PROTECTED) ──
+      setProgressMsg('Mapeando regiões de fala protegidas...');
+      setProgressPercent(60);
+      const speechRegions = mapSpeechRegions(words, config.paddingMs);
+
+      // Calculate speech duration
+      let speechDurationMs = 0;
+      for (const sr of speechRegions) {
+        speechDurationMs += sr.endMs - sr.startMs;
+      }
+      speechDurationMs = Math.min(speechDurationMs, totalDurationMs);
+
+      // ── Step 6: Extract Candidate Zones ──
+      setProgressMsg('Identificando zonas candidatas...');
+      setProgressPercent(65);
+      const candidates = extractCandidateZones(speechRegions, totalDurationMs);
+
+      // ── Step 7: Classify All Candidate Zones ──
+      setProgressMsg('Classificando silêncios e ruídos...');
+      setProgressPercent(70);
+
+      const classified = classifyAllRegions(
+        candidates,
+        normalized,
+        samplesPerSecond,
+        profile,
+        config.minSilenceMs,
+        config.minNoiseMs
+      );
+
+      // ── Step 8: Detect Filler Words ──
+      setProgressMsg('Detectando filler words...');
+      setProgressPercent(85);
+
+      let allRegions: ClassifiedRegion[] = [...classified];
+
+      if (config.includeFillers) {
+        const fillers = detectFillerWords(words, classified);
+        allRegions = [...allRegions, ...fillers];
+      }
+
+      // ── Step 9: Merge and Finalize ──
+      setProgressMsg('Gerando cortes otimizados...');
       setProgressPercent(90);
 
-      const regions: AICutRegion[] = silenceRegions.map((r) => ({
-        startMs: r.startMs,
-        endMs: r.endMs,
-        durationMs: r.durationMs,
-        type: r.type === 'filler' ? ('filler' as const) : ('gap' as const),
-        accepted: true,
-        label: r.label,
-      }));
+      allRegions = mergeAdjacentRegions(allRegions);
+      allRegions.sort((a, b) => a.startMs - b.startMs);
 
-      // Sort by startMs
-      regions.sort((a, b) => a.startMs - b.startMs);
+      // Convert to AICutRegion with accepted flag
+      const regions: AICutRegion[] = allRegions.map((r) => ({
+        ...r,
+        accepted: true,
+      }));
 
       setCutRegions(regions);
 
-      const totalGapMs = regions
-        .filter((r) => r.type === 'gap')
-        .reduce((s, r) => s + r.durationMs, 0);
-      const totalFillerMs = regions
-        .filter((r) => r.type === 'filler')
-        .reduce((s, r) => s + r.durationMs, 0);
+      // Calculate stats
+      const silences = regions.filter((r) => r.type === 'silence');
+      const noises = regions.filter((r) => r.type === 'noise');
+      const fillers = regions.filter((r) => r.type === 'filler');
 
-      setAnalysisResult({
-        totalSilenceMs: totalGapMs + totalFillerMs,
-        totalGapMs,
-        totalFillerMs,
-        speechPercentage: profile.speechPercentage,
-        regionsCount: regions.length,
-        usedTranscription,
+      setStats({
+        totalDurationMs,
+        speechDurationMs,
+        speechPercentage: Math.round((speechDurationMs / totalDurationMs) * 100),
+        silenceCount: silences.length,
+        silenceTotalMs: silences.reduce((s, r) => s + r.durationMs, 0),
+        noiseCount: noises.length,
+        noiseTotalMs: noises.reduce((s, r) => s + r.durationMs, 0),
+        fillerCount: fillers.length,
+        fillerTotalMs: fillers.reduce((s, r) => s + r.durationMs, 0),
+        totalRemovableMs: regions.reduce((s, r) => s + r.durationMs, 0),
+        wordsDetected: words.length,
       });
 
       // Mark regions on timeline for preview
@@ -245,31 +281,37 @@ export function AICutPanel() {
     }
   }, [videoAsset, currentProject, getAggressivenessConfig, setWaveformData, markSilenceRegions]);
 
+  // ─── Actions ─────────────────────────────────────────────
+
   const handleCut = useCallback(() => {
     const accepted = cutRegions.filter((r) => r.accepted);
     if (accepted.length === 0) return;
 
-    // Undo previous marks, then re-mark only accepted and cut
-    undo();
+    undo(); // Remove preview marks
     markSilenceRegions(
       accepted.map((r) => ({ startMs: r.startMs, endMs: r.endMs }))
     );
     cutMarkedSilence();
     setCurrentTimeMs(0);
-    setPhase('cut');
+    setPhase('done');
   }, [cutRegions, undo, markSilenceRegions, cutMarkedSilence, setCurrentTimeMs]);
 
   const handleUndo = useCallback(() => {
     undo();
     setPhase('idle');
     setCutRegions([]);
-    setAnalysisResult(null);
-    setWarning(null);
+    setStats(null);
   }, [undo]);
 
   const toggleRegion = useCallback((index: number) => {
     setCutRegions((prev) =>
       prev.map((r, i) => (i === index ? { ...r, accepted: !r.accepted } : r))
+    );
+  }, []);
+
+  const toggleCategoryAcceptance = useCallback((type: 'silence' | 'noise' | 'filler', accept: boolean) => {
+    setCutRegions((prev) =>
+      prev.map((r) => (r.type === type ? { ...r, accepted: accept } : r))
     );
   }, []);
 
@@ -280,6 +322,8 @@ export function AICutPanel() {
   const rejectAll = useCallback(() => {
     setCutRegions((prev) => prev.map((r) => ({ ...r, accepted: false })));
   }, []);
+
+  // ─── Render ──────────────────────────────────────────────
 
   if (!videoAsset || !hasClips) {
     return (
@@ -299,17 +343,18 @@ export function AICutPanel() {
       <div className="flex items-center gap-2">
         <Bot size={14} className="text-accent-primary" />
         <h3 className="text-xs font-medium text-text-secondary">
-          AI CUT - Corte Inteligente
+          AI CUT — Corte Inteligente
         </h3>
       </div>
 
-      {/* Phase: Idle */}
+      {/* ── Phase: Idle ── */}
       {phase === 'idle' && (
         <>
           <p className="text-[10px] text-text-muted leading-relaxed">
-            O AI CUT usa <strong>análise de áudio (dB)</strong> para detectar
-            silêncios e, quando disponível, <strong>transcrição (Whisper)</strong>{' '}
-            para refinar os pontos de corte com precisão nas bordas das palavras.
+            A IA transcreve o vídeo, mapeia toda a fala como{' '}
+            <strong>conteúdo protegido</strong>, e identifica <strong>silêncios</strong>{' '}
+            e <strong>ruídos ambientais</strong> (motor, latido, vento) para remoção.
+            Nenhum conteúdo falado é removido.
           </p>
 
           {/* Aggressiveness */}
@@ -337,42 +382,46 @@ export function AICutPanel() {
             </div>
             <p className="text-[9px] text-text-muted">
               {aggressiveness === 'conservative' &&
-                'Remove apenas silêncios longos (>800ms). Mais seguro.'}
+                'Remove silêncios >800ms e ruídos >500ms. Padding amplo (200ms). Mais seguro.'}
               {aggressiveness === 'balanced' &&
-                'Remove silêncios >400ms e filler words. Recomendado.'}
+                'Remove silêncios >400ms, ruídos >300ms e fillers. Recomendado.'}
               {aggressiveness === 'aggressive' &&
-                'Remove gaps >200ms e fillers. Ritmo mais rápido.'}
+                'Remove gaps >200ms, ruídos >150ms e fillers. Ritmo rápido.'}
             </p>
           </div>
 
-          {/* Features */}
+          {/* Pipeline steps */}
           <div className="p-2 rounded-md bg-bg-surface/50 border border-border-default/30 space-y-1.5">
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
-              <Volume2 size={10} className="text-accent-primary flex-shrink-0" />
-              <span>Detecção de silêncio por análise de áudio (dB)</span>
-            </div>
-            <div className="flex items-center gap-2 text-[10px] text-text-secondary">
               <Subtitles size={10} className="text-accent-primary flex-shrink-0" />
-              <span>Refinamento com transcrição Whisper (quando disponível)</span>
+              <span>Transcrição completa com Whisper (word-level)</span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
-              <Wand2 size={10} className="text-accent-primary flex-shrink-0" />
-              <span>Config automática de threshold e padding</span>
+              <Shield size={10} className="text-accent-success flex-shrink-0" />
+              <span>Proteção de fala — conteúdo nunca é cortado</span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-text-secondary">
+              <VolumeX size={10} className="text-accent-danger flex-shrink-0" />
+              <span>Detecção de silêncios entre falas</span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-text-secondary">
+              <AlertTriangle size={10} className="text-accent-warning flex-shrink-0" />
+              <span>Detecção de ruídos ambientais (motor, latido, vento)</span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-text-secondary">
+              <MessageCircle size={10} className="text-accent-warning flex-shrink-0" />
+              <span>Remoção de filler words (é, hm, tipo, né...)</span>
             </div>
           </div>
 
-          <Button
-            className="w-full"
-            size="sm"
-            onClick={handleAnalyze}
-          >
+          <Button className="w-full" size="sm" onClick={handleAnalyze}>
             <Bot size={14} />
-            Analisar e Cortar com IA
+            Analisar com IA
           </Button>
         </>
       )}
 
-      {/* Phase: Analyzing */}
+      {/* ── Phase: Analyzing ── */}
       {phase === 'analyzing' && (
         <div className="space-y-3">
           <div className="flex flex-col items-center gap-3 py-4">
@@ -390,67 +439,72 @@ export function AICutPanel() {
           </div>
 
           <div className="space-y-1 text-[9px] text-text-muted">
-            <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${progressPercent >= 5 ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
-              Decodificar áudio
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${progressPercent >= 25 ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
-              Analisar perfil de áudio
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${progressPercent >= 40 ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
-              Detectar silêncios (dB)
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${progressPercent >= 80 ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
-              Refinar com transcrição (Whisper)
-            </div>
+            <StepIndicator done={progressPercent >= 10} label="Decodificar áudio" />
+            <StepIndicator done={progressPercent >= 50} label="Transcrever com Whisper" />
+            <StepIndicator done={progressPercent >= 60} label="Mapear regiões de fala" />
+            <StepIndicator done={progressPercent >= 70} label="Classificar silêncios e ruídos" />
+            <StepIndicator done={progressPercent >= 85} label="Detectar filler words" />
+            <StepIndicator done={progressPercent >= 95} label="Gerar cortes otimizados" />
           </div>
         </div>
       )}
 
-      {/* Warning (e.g. Whisper unavailable) */}
-      {warning && (
-        <div className="p-2 rounded-md bg-accent-warning/10 border border-accent-warning/20 flex items-start gap-2">
-          <AlertTriangle size={12} className="text-accent-warning flex-shrink-0 mt-0.5" />
-          <p className="text-[10px] text-accent-warning/90">{warning}</p>
-        </div>
-      )}
-
-      {/* Error */}
+      {/* ── Error ── */}
       {error && (
-        <div className="p-2 rounded-md bg-accent-danger/10 border border-accent-danger/20">
-          <p className="text-xs text-accent-danger">{error}</p>
+        <div className="p-2.5 rounded-md bg-accent-danger/10 border border-accent-danger/20 space-y-1.5">
+          <p className="text-[11px] text-accent-danger font-medium">{error}</p>
           <button
             onClick={() => { setError(null); setPhase('idle'); }}
-            className="text-[10px] text-accent-danger/70 hover:underline mt-1"
+            className="text-[10px] text-accent-danger/70 hover:underline"
           >
             Tentar novamente
           </button>
         </div>
       )}
 
-      {/* Phase: Review */}
+      {/* ── Phase: Review ── */}
       {phase === 'review' && (
         <div className="space-y-2">
-          {/* Analysis Summary */}
-          {analysisResult && (
-            <div className="p-2.5 rounded-md bg-accent-primary/8 border border-accent-primary/15 space-y-1.5">
-              <p className="text-xs text-text-secondary font-medium">
-                {analysisResult.regionsCount} regiões de corte identificadas
-              </p>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] text-text-muted">
-                <span>Silêncios: <span className="text-text-secondary font-mono">{formatDuration(analysisResult.totalGapMs)}</span></span>
-                <span>Filler words: <span className="text-text-secondary font-mono">{formatDuration(analysisResult.totalFillerMs)}</span></span>
-                <span>Total removível: <span className="text-text-secondary font-mono">{formatDuration(analysisResult.totalSilenceMs)}</span></span>
-                <span>Fala no vídeo: <span className="text-text-secondary font-mono">{analysisResult.speechPercentage}%</span></span>
+          {/* Professional Summary */}
+          {stats && (
+            <div className="p-2.5 rounded-md bg-bg-surface/80 border border-border-default/40 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs text-text-secondary font-medium">
+                <Wand2 size={12} className="text-accent-primary" />
+                Análise Completa
               </div>
-              <div className="text-[9px] text-text-muted mt-1">
-                {analysisResult.usedTranscription
-                  ? <span className="text-accent-success">Refinado com transcrição Whisper</span>
-                  : <span className="text-accent-warning">Baseado em análise de áudio (dB)</span>
-                }
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[9px]">
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <Mic size={8} className="text-accent-success" />
+                  <span>Fala: <span className="text-text-secondary font-mono">{formatDuration(stats.speechDurationMs)}</span> ({stats.speechPercentage}%)</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <Subtitles size={8} className="text-accent-primary" />
+                  <span>Palavras: <span className="text-text-secondary font-mono">{stats.wordsDetected}</span></span>
+                </div>
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <VolumeX size={8} className="text-accent-danger" />
+                  <span>Silêncios: <span className="text-text-secondary font-mono">{stats.silenceCount}</span> ({formatDuration(stats.silenceTotalMs)})</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <AlertTriangle size={8} className="text-accent-warning" />
+                  <span>Ruídos: <span className="text-text-secondary font-mono">{stats.noiseCount}</span> ({formatDuration(stats.noiseTotalMs)})</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <MessageCircle size={8} className="text-accent-warning" />
+                  <span>Fillers: <span className="text-text-secondary font-mono">{stats.fillerCount}</span> ({formatDuration(stats.fillerTotalMs)})</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-text-muted">
+                  <Scissors size={8} className="text-accent-primary" />
+                  <span>Removível: <span className="text-text-secondary font-mono">{formatDuration(stats.totalRemovableMs)}</span></span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 pt-1 border-t border-border-default/20">
+                <Shield size={9} className="text-accent-success" />
+                <span className="text-[9px] text-accent-success">
+                  Todo conteúdo falado está protegido
+                </span>
               </div>
             </div>
           )}
@@ -458,7 +512,7 @@ export function AICutPanel() {
           {/* Accept/Reject All */}
           <div className="flex items-center justify-between">
             <span className="text-[10px] text-text-muted">
-              {acceptedRegions.length} de {cutRegions.length} selecionados
+              {acceptedRegions.length}/{cutRegions.length} selecionados
               ({formatDuration(totalCutMs)})
             </span>
             <div className="flex gap-1">
@@ -472,101 +526,145 @@ export function AICutPanel() {
             </div>
           </div>
 
-          {/* Toggle details */}
-          <button
-            onClick={() => setShowDetails(!showDetails)}
-            className="w-full flex items-center justify-between py-1 text-[10px] text-text-muted hover:text-text-secondary"
-          >
-            <span>{showDetails ? 'Ocultar' : 'Ver'} detalhes dos cortes</span>
-            {showDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-          </button>
+          {/* ── Silence Regions ── */}
+          {silenceRegions.length > 0 && (
+            <CategorySection
+              title={`Silêncios (${silenceRegions.length})`}
+              subtitle={formatDuration(silenceRegions.reduce((s, r) => s + r.durationMs, 0))}
+              icon={<VolumeX size={10} className="text-accent-danger" />}
+              isOpen={showSilences}
+              onToggle={() => setShowSilences(!showSilences)}
+              acceptedCount={silenceRegions.filter((r) => r.accepted).length}
+              totalCount={silenceRegions.length}
+              onAcceptAll={() => toggleCategoryAcceptance('silence', true)}
+              onRejectAll={() => toggleCategoryAcceptance('silence', false)}
+              colorClass="accent-danger"
+            >
+              {silenceRegions.map((region) => {
+                const globalIdx = cutRegions.indexOf(region);
+                return (
+                  <RegionRow
+                    key={globalIdx}
+                    region={region}
+                    onToggle={() => toggleRegion(globalIdx)}
+                    onPreview={() => setCurrentTimeMs(Math.max(0, region.startMs - 500))}
+                    colorClass="accent-danger"
+                  />
+                );
+              })}
+            </CategorySection>
+          )}
 
-          {/* Region List */}
-          {showDetails && (
-            <div className="max-h-48 overflow-y-auto space-y-1">
-              {cutRegions.map((region, i) => (
-                <div
-                  key={i}
-                  className={`flex items-center gap-1.5 p-1.5 rounded-md text-[10px] transition-colors ${
-                    region.accepted
-                      ? region.type === 'filler'
-                        ? 'bg-accent-warning/8 border border-accent-warning/15'
-                        : 'bg-accent-danger/8 border border-accent-danger/15'
-                      : 'bg-bg-surface border border-border-default/40 opacity-50'
-                  }`}
-                >
-                  <button
-                    onClick={() => toggleRegion(i)}
-                    className={`p-0.5 rounded flex-shrink-0 ${
-                      region.accepted
-                        ? region.type === 'filler'
-                          ? 'text-accent-warning'
-                          : 'text-accent-danger'
-                        : 'text-text-muted'
-                    }`}
-                  >
-                    {region.accepted ? <Check size={11} /> : <X size={11} />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <span className="font-mono text-text-muted">
-                      {formatDuration(region.startMs)} - {formatDuration(region.endMs)}
-                    </span>
-                    <span className="text-text-muted/50 ml-1">
-                      ({(region.durationMs / 1000).toFixed(1)}s)
-                    </span>
-                    <p className="text-[9px] text-text-muted/70 truncate">{region.label}</p>
-                  </div>
-                  <span className={`text-[8px] px-1 py-0.5 rounded ${
-                    region.type === 'filler'
-                      ? 'bg-accent-warning/10 text-accent-warning'
-                      : 'bg-accent-danger/10 text-accent-danger'
-                  }`}>
-                    {region.type === 'filler' ? 'FILLER' : 'GAP'}
-                  </span>
-                  <button
-                    onClick={() => setCurrentTimeMs(Math.max(0, region.startMs - 500))}
-                    className="p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-secondary flex-shrink-0"
-                  >
-                    <Play size={9} />
-                  </button>
-                </div>
-              ))}
+          {/* ── Noise Regions ── */}
+          {noiseRegions.length > 0 && (
+            <CategorySection
+              title={`Ruídos (${noiseRegions.length})`}
+              subtitle={formatDuration(noiseRegions.reduce((s, r) => s + r.durationMs, 0))}
+              icon={<AlertTriangle size={10} className="text-accent-warning" />}
+              isOpen={showNoises}
+              onToggle={() => setShowNoises(!showNoises)}
+              acceptedCount={noiseRegions.filter((r) => r.accepted).length}
+              totalCount={noiseRegions.length}
+              onAcceptAll={() => toggleCategoryAcceptance('noise', true)}
+              onRejectAll={() => toggleCategoryAcceptance('noise', false)}
+              colorClass="accent-warning"
+            >
+              {noiseRegions.map((region) => {
+                const globalIdx = cutRegions.indexOf(region);
+                return (
+                  <RegionRow
+                    key={globalIdx}
+                    region={region}
+                    onToggle={() => toggleRegion(globalIdx)}
+                    onPreview={() => setCurrentTimeMs(Math.max(0, region.startMs - 500))}
+                    colorClass="accent-warning"
+                  />
+                );
+              })}
+            </CategorySection>
+          )}
+
+          {/* ── Filler Regions ── */}
+          {fillerRegions.length > 0 && (
+            <CategorySection
+              title={`Filler Words (${fillerRegions.length})`}
+              subtitle={formatDuration(fillerRegions.reduce((s, r) => s + r.durationMs, 0))}
+              icon={<MessageCircle size={10} className="text-accent-warning" />}
+              isOpen={showFillers}
+              onToggle={() => setShowFillers(!showFillers)}
+              acceptedCount={fillerRegions.filter((r) => r.accepted).length}
+              totalCount={fillerRegions.length}
+              onAcceptAll={() => toggleCategoryAcceptance('filler', true)}
+              onRejectAll={() => toggleCategoryAcceptance('filler', false)}
+              colorClass="accent-warning"
+            >
+              {fillerRegions.map((region) => {
+                const globalIdx = cutRegions.indexOf(region);
+                return (
+                  <RegionRow
+                    key={globalIdx}
+                    region={region}
+                    onToggle={() => toggleRegion(globalIdx)}
+                    onPreview={() => setCurrentTimeMs(Math.max(0, region.startMs - 500))}
+                    colorClass="accent-warning"
+                  />
+                );
+              })}
+            </CategorySection>
+          )}
+
+          {/* No regions found */}
+          {cutRegions.length === 0 && (
+            <div className="p-3 rounded-md bg-accent-success/10 border border-accent-success/20 text-center">
+              <p className="text-xs text-accent-success">
+                Nenhum silêncio ou ruído significativo encontrado.
+              </p>
+              <p className="text-[9px] text-text-muted mt-1">
+                O vídeo está limpo! Tente o modo &quot;Agressivo&quot; para detectar gaps menores.
+              </p>
             </div>
           )}
 
           {/* Action buttons */}
-          <div className="space-y-1.5">
-            <Button
-              className="w-full"
-              size="sm"
-              variant="danger"
-              disabled={acceptedRegions.length === 0}
-              onClick={handleCut}
-            >
-              <Scissors size={14} />
-              AI CUT - Aplicar Cortes ({acceptedRegions.length})
-            </Button>
+          {cutRegions.length > 0 && (
+            <div className="space-y-1.5 pt-1">
+              <Button
+                className="w-full"
+                size="sm"
+                variant="danger"
+                disabled={acceptedRegions.length === 0}
+                onClick={handleCut}
+              >
+                <Scissors size={14} />
+                AI CUT — Aplicar {acceptedRegions.length} cortes ({formatDuration(totalCutMs)})
+              </Button>
 
-            <button
-              onClick={handleUndo}
-              className="w-full text-[10px] text-text-muted hover:text-text-secondary py-1 hover:underline"
-            >
-              Cancelar e voltar
-            </button>
-          </div>
+              <button
+                onClick={handleUndo}
+                className="w-full text-[10px] text-text-muted hover:text-text-secondary py-1 hover:underline"
+              >
+                Cancelar e voltar
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Phase: Cut done */}
-      {phase === 'cut' && (
+      {/* ── Phase: Done ── */}
+      {phase === 'done' && (
         <div className="space-y-2">
           <div className="p-2.5 rounded-md bg-accent-success/10 border border-accent-success/20 text-center">
             <p className="text-xs text-accent-success font-medium">
               AI CUT aplicado com sucesso!
             </p>
             <p className="text-[10px] text-text-muted mt-1">
-              {acceptedRegions.length} cortes realizados ({formatDuration(totalCutMs)} removidos)
+              {acceptedRegions.length} cortes realizados — {formatDuration(totalCutMs)} removidos
             </p>
+            {stats && (
+              <p className="text-[9px] text-text-muted mt-0.5">
+                Fala protegida: {formatDuration(stats.speechDurationMs)} ({stats.speechPercentage}% do original)
+              </p>
+            )}
           </div>
 
           <div className="flex gap-2">
@@ -586,8 +684,7 @@ export function AICutPanel() {
               onClick={() => {
                 setPhase('idle');
                 setCutRegions([]);
-                setAnalysisResult(null);
-                setWarning(null);
+                setStats(null);
               }}
             >
               Novo corte
@@ -596,13 +693,137 @@ export function AICutPanel() {
         </div>
       )}
 
-      {/* Initial hint */}
+      {/* Hint */}
       {phase === 'idle' && !error && (
         <p className="text-center text-[9px] text-text-muted py-1 leading-relaxed">
-          Funciona mesmo sem API de transcrição configurada.
-          Com Whisper ativado, os cortes ficam ainda mais precisos.
+          Requer API key da OpenAI configurada na Vercel.
+          A transcrição garante que nenhum conteúdo falado seja removido.
         </p>
       )}
+    </div>
+  );
+}
+
+// ─── Sub-components ──────────────────────────────────────────
+
+function StepIndicator({ done, label }: { done: boolean; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className={`w-1.5 h-1.5 rounded-full ${done ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
+      {label}
+    </div>
+  );
+}
+
+function CategorySection({
+  title,
+  subtitle,
+  icon,
+  isOpen,
+  onToggle,
+  acceptedCount,
+  totalCount,
+  onAcceptAll,
+  onRejectAll,
+  colorClass,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  isOpen: boolean;
+  onToggle: () => void;
+  acceptedCount: number;
+  totalCount: number;
+  onAcceptAll: () => void;
+  onRejectAll: () => void;
+  colorClass: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`rounded-md border border-${colorClass}/15 overflow-hidden`}>
+      <button
+        onClick={onToggle}
+        className={`w-full flex items-center gap-2 p-2 bg-${colorClass}/5 hover:bg-${colorClass}/8 transition-colors`}
+      >
+        {icon}
+        <span className="text-[10px] font-medium text-text-secondary flex-1 text-left">
+          {title}
+        </span>
+        <span className="text-[9px] text-text-muted font-mono">{subtitle}</span>
+        <span className="text-[9px] text-text-muted ml-1">
+          ({acceptedCount}/{totalCount})
+        </span>
+        {isOpen ? <ChevronUp size={11} className="text-text-muted" /> : <ChevronDown size={11} className="text-text-muted" />}
+      </button>
+
+      {isOpen && (
+        <div className="border-t border-border-default/20">
+          <div className="flex justify-end gap-1 px-2 py-1 bg-bg-surface/30">
+            <button onClick={onAcceptAll} className="text-[9px] text-accent-success hover:underline">
+              Aceitar todos
+            </button>
+            <span className="text-text-muted text-[9px]">|</span>
+            <button onClick={onRejectAll} className="text-[9px] text-accent-danger hover:underline">
+              Rejeitar todos
+            </button>
+          </div>
+          <div className="max-h-36 overflow-y-auto space-y-0.5 p-1">
+            {children}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RegionRow({
+  region,
+  onToggle,
+  onPreview,
+  colorClass,
+}: {
+  region: AICutRegion;
+  onToggle: () => void;
+  onPreview: () => void;
+  colorClass: string;
+}) {
+  return (
+    <div
+      className={`flex items-center gap-1.5 p-1.5 rounded text-[10px] transition-colors ${
+        region.accepted
+          ? `bg-${colorClass}/8`
+          : 'bg-bg-surface opacity-40'
+      }`}
+    >
+      <button
+        onClick={onToggle}
+        className={`p-0.5 rounded flex-shrink-0 ${
+          region.accepted ? `text-${colorClass}` : 'text-text-muted'
+        }`}
+      >
+        {region.accepted ? <Check size={11} /> : <X size={11} />}
+      </button>
+      <div className="flex-1 min-w-0">
+        <span className="font-mono text-text-muted">
+          {formatDuration(region.startMs)} — {formatDuration(region.endMs)}
+        </span>
+        <span className="text-text-muted/50 ml-1">
+          ({(region.durationMs / 1000).toFixed(1)}s)
+        </span>
+        <p className="text-[9px] text-text-muted/70 truncate">{region.label}</p>
+      </div>
+      {region.noiseType && (
+        <span className={`text-[8px] px-1 py-0.5 rounded bg-${colorClass}/10 text-${colorClass}`}>
+          {region.noiseType === 'continuous' ? 'CONT' : region.noiseType === 'impulsive' ? 'IMP' : 'AMB'}
+        </span>
+      )}
+      <button
+        onClick={onPreview}
+        className="p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-secondary flex-shrink-0"
+      >
+        <Play size={9} />
+      </button>
     </div>
   );
 }
