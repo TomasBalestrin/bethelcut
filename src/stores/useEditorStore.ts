@@ -16,7 +16,7 @@ interface EditorStore {
   selectedTrackId: string | null;
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
-  activeTab: 'media' | 'captions' | 'silence' | 'effects';
+  activeTab: 'media' | 'captions' | 'silence' | 'ai-cut' | 'effects';
 
   setProjectId: (id: string) => void;
   setIsPlaying: (playing: boolean) => void;
@@ -31,7 +31,7 @@ interface EditorStore {
   setSelectedTrackId: (id: string | null) => void;
   toggleLeftPanel: () => void;
   toggleRightPanel: () => void;
-  setActiveTab: (tab: 'media' | 'captions' | 'silence' | 'effects') => void;
+  setActiveTab: (tab: 'media' | 'captions' | 'silence' | 'ai-cut' | 'effects') => void;
   reset: () => void;
 }
 

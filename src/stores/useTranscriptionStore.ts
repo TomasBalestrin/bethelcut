@@ -21,6 +21,7 @@ interface TranscriptionStore {
 
   // Settings
   minPauseDurationMs: number;
+  gapPaddingMs: number;
 
   setTranscription: (data: {
     id: string;
@@ -36,7 +37,9 @@ interface TranscriptionStore {
   selectAllFillerWords: () => void;
   selectAllPauses: () => void;
   setMinPauseDurationMs: (ms: number) => void;
+  setGapPaddingMs: (ms: number) => void;
   getSelectedRegions: () => { startMs: number; endMs: number }[];
+  getPauseRegionsWithPadding: () => { startMs: number; endMs: number }[];
   reset: () => void;
 }
 
@@ -76,6 +79,7 @@ export const useTranscriptionStore = create<TranscriptionStore>((set, get) => ({
   fillerWordIndices: [],
   pauseRegions: [],
   minPauseDurationMs: 500,
+  gapPaddingMs: 80,
 
   setTranscription: (data) =>
     set({
@@ -126,6 +130,18 @@ export const useTranscriptionStore = create<TranscriptionStore>((set, get) => ({
       minPauseDurationMs: ms,
       pauseRegions: detectPauses(state.words, ms),
     })),
+
+  setGapPaddingMs: (ms) => set({ gapPaddingMs: ms }),
+
+  getPauseRegionsWithPadding: () => {
+    const { pauseRegions, gapPaddingMs } = get();
+    return pauseRegions
+      .map((p) => ({
+        startMs: Math.max(0, p.startMs + gapPaddingMs),
+        endMs: Math.max(p.startMs + gapPaddingMs, p.endMs - gapPaddingMs),
+      }))
+      .filter((r) => r.endMs - r.startMs > 20);
+  },
 
   getSelectedRegions: () => {
     const { words, selectedWordIndices } = get();
