@@ -37,6 +37,7 @@ import {
   detectFillerWords,
   mergeAdjacentRegions,
   learnSpeakerRhythm,
+  waveformSilenceSweep,
   type ClassifiedRegion,
   type AdaptiveConfig,
 } from '@/lib/audio/noise-classifier';
@@ -268,18 +269,31 @@ export function AICutPanel() {
         config.adaptive
       );
 
-      // ── Step 9: Detect Filler Words ──
+      // ── Step 9: Secondary Waveform Sweep ──
+      setProgressMsg('Varredura secundária de silêncios na waveform...');
+      setProgressPercent(78);
+
+      const sweepSilences = waveformSilenceSweep(
+        normalized,
+        samplesPerSecond,
+        profile,
+        words,
+        classified,
+        config.adaptive.minCutMs
+      );
+
+      let allRegions: ClassifiedRegion[] = [...classified, ...sweepSilences];
+
+      // ── Step 10: Detect Filler Words ──
       setProgressMsg('Detectando filler words...');
       setProgressPercent(85);
 
-      let allRegions: ClassifiedRegion[] = [...classified];
-
       if (config.includeFillers) {
-        const fillers = detectFillerWords(words, classified);
+        const fillers = detectFillerWords(words, allRegions);
         allRegions = [...allRegions, ...fillers];
       }
 
-      // ── Step 10: Merge and Finalize ──
+      // ── Step 11: Merge and Finalize ──
       setProgressMsg('Gerando cortes otimizados...');
       setProgressPercent(90);
 
@@ -498,6 +512,7 @@ export function AICutPanel() {
             <StepIndicator done={progressPercent >= 58} label="Mapear regiões de fala" />
             <StepIndicator done={progressPercent >= 62} label="Aprender ritmo do speaker" />
             <StepIndicator done={progressPercent >= 70} label="Classificar silêncios e ruídos (adaptativo)" />
+            <StepIndicator done={progressPercent >= 78} label="Varredura secundária de waveform" />
             <StepIndicator done={progressPercent >= 85} label="Detectar filler words" />
             <StepIndicator done={progressPercent >= 95} label="Gerar cortes harmônicos" />
           </div>
