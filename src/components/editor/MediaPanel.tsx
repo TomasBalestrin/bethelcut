@@ -12,12 +12,14 @@ import {
   FileVideo,
   Trash2,
   Plus,
+  Bot,
 } from 'lucide-react';
 import { useEditorStore } from '@/stores/useEditorStore';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useTimelineStore } from '@/stores/useTimelineStore';
 import { SilenceCutPanel } from '@/components/silence/SilenceCutPanel';
 import { TextBasedEditor } from '@/components/transcription/TextBasedEditor';
+import { AICutPanel } from '@/components/ai-cut/AICutPanel';
 import { createClient } from '@/lib/supabase/client';
 import { formatFileSize, formatDuration } from '@/lib/utils';
 import type { MediaAsset } from '@/types/project';
@@ -42,12 +44,13 @@ function getMediaDuration(file: File): Promise<number> {
   });
 }
 
-type TabId = 'media' | 'captions' | 'silence' | 'effects';
+type TabId = 'media' | 'captions' | 'silence' | 'ai-cut' | 'effects';
 
 const tabs: { id: TabId; label: string; icon: typeof Video }[] = [
   { id: 'media', label: 'Mídia', icon: Video },
   { id: 'captions', label: 'Legendas', icon: Subtitles },
   { id: 'silence', label: 'Silêncio', icon: Scissors },
+  { id: 'ai-cut', label: 'AI CUT', icon: Bot },
   { id: 'effects', label: 'Efeitos', icon: Sparkles },
 ];
 
@@ -388,6 +391,10 @@ export function MediaPanel() {
 
         {activeTab === 'silence' && (
           <SilenceCutPanel />
+        )}
+
+        {activeTab === 'ai-cut' && (
+          <AICutPanel />
         )}
 
         {activeTab === 'effects' && (

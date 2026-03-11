@@ -10,6 +10,7 @@ import {
   AlertCircle,
   Filter,
   Clock,
+  Zap,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useTranscriptionStore } from '@/stores/useTranscriptionStore';
@@ -39,6 +40,7 @@ export function TextBasedEditor() {
     fillerWordIndices,
     pauseRegions,
     minPauseDurationMs,
+    gapPaddingMs,
     setTranscription,
     setIsTranscribing,
     setError,
@@ -47,7 +49,9 @@ export function TextBasedEditor() {
     clearSelection,
     selectAllFillerWords,
     setMinPauseDurationMs,
+    setGapPaddingMs,
     getSelectedRegions,
+    getPauseRegionsWithPadding,
   } = useTranscriptionStore();
 
   const [phase, setPhase] = useState<Phase>(words.length > 0 ? 'editing' : 'idle');
@@ -162,13 +166,11 @@ export function TextBasedEditor() {
 
   const handleDeletePauses = useCallback(() => {
     if (pauseRegions.length === 0) return;
-    const regions = pauseRegions.map((p) => ({
-      startMs: p.startMs,
-      endMs: p.endMs,
-    }));
+    const regions = getPauseRegionsWithPadding();
+    if (regions.length === 0) return;
     markSilenceRegions(regions);
     cutMarkedSilence();
-  }, [pauseRegions, markSilenceRegions, cutMarkedSilence]);
+  }, [pauseRegions, getPauseRegionsWithPadding, markSilenceRegions, cutMarkedSilence]);
 
   // Current playback word highlighting
   const currentTimeMs = useEditorStore((s) => s.currentTimeMs);
@@ -320,14 +322,40 @@ export function TextBasedEditor() {
                   </label>
                   <input
                     type="range"
-                    min={200}
+                    min={100}
                     max={3000}
-                    step={100}
+                    step={50}
                     value={minPauseDurationMs}
                     onChange={(e) => setMinPauseDurationMs(Number(e.target.value))}
                     className="w-full"
                   />
+                  <div className="flex justify-between text-[9px] text-text-muted mt-0.5">
+                    <span>100ms (agressivo)</span>
+                    <span>3000ms (conservador)</span>
+                  </div>
                 </div>
+                <div>
+                  <label className="text-[10px] text-text-muted">
+                    Padding do corte: <span className="text-text-secondary font-mono">{gapPaddingMs}ms</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={300}
+                    step={10}
+                    value={gapPaddingMs}
+                    onChange={(e) => setGapPaddingMs(Number(e.target.value))}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-[9px] text-text-muted mt-0.5">
+                    <span>0ms (sem margem)</span>
+                    <span>300ms (mais seguro)</span>
+                  </div>
+                </div>
+                <p className="text-[9px] text-text-muted leading-relaxed">
+                  O padding preserva uma margem ao redor de cada corte para evitar
+                  que o início/fim da fala seja cortado.
+                </p>
                 <p className="text-[9px] text-text-muted">
                   Filler words PT-BR: é, hm, um, tipo, né, então, assim...
                 </p>

@@ -22,7 +22,10 @@ import {
   Play,
   Trash2,
   Undo2,
+  Wand2,
+  Loader2,
 } from 'lucide-react';
+import { analyzeAudioProfile } from '@/lib/audio/smart-silence-analyzer';
 
 type Phase = 'config' | 'detected' | 'cut';
 
@@ -54,6 +57,13 @@ export function SilenceCutPanel() {
   const [error, setError] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [phase, setPhase] = useState<Phase>('config');
+  const [isAutoConfiguring, setIsAutoConfiguring] = useState(false);
+  const [audioProfile, setAudioProfile] = useState<{
+    noiseFloorDb: number;
+    speechLevelDb: number;
+    speechPercentage: number;
+    silencePercentage: number;
+  } | null>(null);
 
   const videoAsset = mediaAssets.find((a) => a.type === 'video');
   const videoTrack = tracks.find((t) => t.type === 'video');
@@ -135,6 +145,38 @@ export function SilenceCutPanel() {
     setCurrentTimeMs(Math.max(0, startMs - 500));
   }, [setCurrentTimeMs]);
 
+  const handleAutoConfig = useCallback(async () => {
+    if (!videoAsset) return;
+
+    setIsAutoConfiguring(true);
+    setError(null);
+
+    try {
+      const audioBuffer = await decodeAudioFromVideo(videoAsset.fileUrl);
+      const samplesPerSecond = EDITOR_CONFIG.WAVEFORM_SAMPLES_PER_SECOND;
+      const rawData = await extractWaveformData(audioBuffer, samplesPerSecond);
+      const normalized = normalizeWaveform(rawData);
+      setWaveformData(normalized);
+
+      const profile = analyzeAudioProfile(normalized, samplesPerSecond);
+
+      setThresholdDb(profile.recommendedThresholdDb);
+      setMinDurationMs(profile.recommendedMinDurationMs);
+      setPaddingMs(profile.recommendedPaddingMs);
+      setAudioProfile({
+        noiseFloorDb: profile.noiseFloorDb,
+        speechLevelDb: profile.speechLevelDb,
+        speechPercentage: profile.speechPercentage,
+        silencePercentage: profile.silencePercentage,
+      });
+    } catch (err) {
+      console.error('Auto-config error:', err);
+      setError('Erro ao analisar o áudio automaticamente.');
+    } finally {
+      setIsAutoConfiguring(false);
+    }
+  }, [videoAsset, setThresholdDb, setMinDurationMs, setPaddingMs, setWaveformData]);
+
   if (!videoAsset || !hasClips) {
     return (
       <div className="text-center py-8">
@@ -154,6 +196,43 @@ export function SilenceCutPanel() {
         <Scissors size={14} className="text-accent-primary" />
         <h3 className="text-xs font-medium text-text-secondary">Corte de Silêncio</h3>
       </div>
+
+      {/* Smart Auto-Config */}
+      {phase === 'config' && (
+        <div className="space-y-2">
+          <button
+            onClick={handleAutoConfig}
+            disabled={isAutoConfiguring}
+            className="w-full flex items-center justify-center gap-2 p-2.5 rounded-md bg-accent-primary/8 border border-accent-primary/20 hover:bg-accent-primary/15 text-accent-primary text-xs font-medium transition-colors disabled:opacity-50"
+          >
+            {isAutoConfiguring ? (
+              <>
+                <Loader2 size={14} className="animate-spin" />
+                Analisando áudio...
+              </>
+            ) : (
+              <>
+                <Wand2 size={14} />
+                Config Inteligente (IA)
+              </>
+            )}
+          </button>
+
+          {audioProfile && (
+            <div className="p-2 rounded-md bg-accent-success/8 border border-accent-success/15 space-y-1">
+              <p className="text-[10px] text-accent-success font-medium">
+                Configuração otimizada aplicada
+              </p>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] text-text-muted">
+                <span>Ruído de fundo: <span className="text-text-secondary font-mono">{audioProfile.noiseFloorDb} dB</span></span>
+                <span>Nível de fala: <span className="text-text-secondary font-mono">{audioProfile.speechLevelDb} dB</span></span>
+                <span>Fala: <span className="text-text-secondary font-mono">{audioProfile.speechPercentage}%</span></span>
+                <span>Silêncio: <span className="text-text-secondary font-mono">{audioProfile.silencePercentage}%</span></span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Settings */}
       <div className="space-y-3">

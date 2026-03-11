@@ -13,7 +13,7 @@ export interface EditorState {
   selectedTrackId: string | null;
   leftPanelOpen: boolean;
   rightPanelOpen: boolean;
-  activeTab: 'media' | 'captions' | 'silence' | 'effects';
+  activeTab: 'media' | 'captions' | 'silence' | 'ai-cut' | 'effects';
 }
 
 export interface VideoMetadata {
