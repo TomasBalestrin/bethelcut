@@ -683,6 +683,147 @@ export function classifyAllRegions(
   return classified.sort((a, b) => a.startMs - b.startMs);
 }
 
+// ─── Secondary Waveform Sweep ────────────────────────────────
+
+/**
+ * Secondary sample-level waveform sweep that catches silences the
+ * transcription-based candidate zone analysis missed.
+ *
+ * Why this is needed:
+ * - Whisper timestamps can be imprecise, causing silence to be "protected"
+ * - The adaptive threshold in candidate zones uses RMS which biases high
+ * - Padding around speech regions shrinks candidate zones too much
+ *
+ * This sweep scans the ENTIRE waveform sample-by-sample (like the dB detector),
+ * but protects only actual word timestamps (no padding inflation).
+ * Any silence found that doesn't overlap with existing classified regions is added.
+ */
+export function waveformSilenceSweep(
+  waveformData: number[],
+  samplesPerSecond: number,
+  profile: AudioProfile,
+  words: { word: string; startMs: number; endMs: number }[],
+  existingRegions: ClassifiedRegion[],
+  minDurationMs: number = 200
+): ClassifiedRegion[] {
+  const msPerSample = 1000 / samplesPerSecond;
+  const totalMs = waveformData.length * msPerSample;
+
+  // Use the profile's recommended threshold — this is the sweet spot
+  // between noise floor and speech level (50% midpoint)
+  const thresholdDb = profile.recommendedThresholdDb;
+
+  // Smoothing window (50ms) to avoid false triggers from momentary dips
+  const smoothWindow = Math.max(1, Math.round((50 / 1000) * samplesPerSecond));
+  const halfWindow = Math.floor(smoothWindow / 2);
+
+  // Scan waveform sample-by-sample
+  const silences: { startMs: number; endMs: number; avgDb: number }[] = [];
+  let silenceStart: number | null = null;
+  let dbSum = 0;
+  let dbCount = 0;
+
+  for (let i = 0; i < waveformData.length; i++) {
+    // Smoothed amplitude over window
+    const winStart = Math.max(0, i - halfWindow);
+    const winEnd = Math.min(waveformData.length - 1, i + halfWindow);
+    let windowSum = 0;
+    let windowCount = 0;
+    for (let j = winStart; j <= winEnd; j++) {
+      windowSum += waveformData[j];
+      windowCount++;
+    }
+    const smoothedAmp = windowSum / windowCount;
+    const db = amplitudeToDb(Math.max(0.00001, smoothedAmp));
+    const currentMs = i * msPerSample;
+
+    if (db < thresholdDb) {
+      if (silenceStart === null) {
+        silenceStart = currentMs;
+        dbSum = 0;
+        dbCount = 0;
+      }
+      if (db > -80) {
+        dbSum += db;
+        dbCount++;
+      }
+    } else {
+      if (silenceStart !== null) {
+        const duration = currentMs - silenceStart;
+        if (duration >= minDurationMs) {
+          const avgDb = dbCount > 0 ? dbSum / dbCount : -60;
+          silences.push({ startMs: silenceStart, endMs: currentMs, avgDb });
+        }
+        silenceStart = null;
+      }
+    }
+  }
+
+  // Handle trailing silence
+  if (silenceStart !== null) {
+    const duration = totalMs - silenceStart;
+    if (duration >= minDurationMs) {
+      const avgDb = dbCount > 0 ? dbSum / dbCount : -60;
+      silences.push({ startMs: silenceStart, endMs: totalMs, avgDb });
+    }
+  }
+
+  // Filter: remove any silence that overlaps with actual word timestamps
+  // Use tight word boundaries (no padding) — we only protect confirmed speech
+  const sortedWords = [...words].sort((a, b) => a.startMs - b.startMs);
+
+  const speechSafe = silences.filter((s) => {
+    // Check if any word overlaps with this silence
+    for (const w of sortedWords) {
+      // Word overlaps if it starts before silence ends AND ends after silence starts
+      if (w.startMs < s.endMs && w.endMs > s.startMs) {
+        // There's overlap — check how much
+        const overlapStart = Math.max(s.startMs, w.startMs);
+        const overlapEnd = Math.min(s.endMs, w.endMs);
+        const overlapMs = overlapEnd - overlapStart;
+        const silenceDuration = s.endMs - s.startMs;
+
+        // If speech covers more than 30% of this silence, it's not silence
+        if (overlapMs / silenceDuration > 0.3) return false;
+      }
+
+      // Optimization: words are sorted, skip if word starts after silence ends
+      if (w.startMs > s.endMs) break;
+    }
+    return true;
+  });
+
+  // Filter: remove silences already covered by existing classified regions
+  const newSilences = speechSafe.filter((s) => {
+    const sMid = (s.startMs + s.endMs) / 2;
+    for (const r of existingRegions) {
+      // If the midpoint of this silence is inside an existing region, skip it
+      if (sMid >= r.startMs && sMid <= r.endMs) return false;
+    }
+    return true;
+  });
+
+  // Trim edges: apply small padding (50ms) to avoid cutting into speech transitions
+  const result: ClassifiedRegion[] = [];
+  for (const s of newSilences) {
+    const paddedStart = s.startMs + 50;
+    const paddedEnd = s.endMs - 50;
+    const duration = paddedEnd - paddedStart;
+    if (duration < 80) continue;
+
+    result.push({
+      startMs: paddedStart,
+      endMs: paddedEnd,
+      durationMs: duration,
+      type: 'silence',
+      label: `Silêncio (${s.avgDb.toFixed(1)} dB) [sweep]`,
+      avgDb: s.avgDb,
+      confidence: 0.8,
+    });
+  }
+  return result;
+}
+
 // ─── Filler Word Detection ───────────────────────────────────
 
 const FILLER_WORDS_PT = [
