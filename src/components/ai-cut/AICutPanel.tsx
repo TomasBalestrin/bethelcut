@@ -15,6 +15,7 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
+  AlertTriangle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useProjectStore } from '@/stores/useProjectStore';
@@ -27,8 +28,9 @@ import { normalizeWaveform } from '@/lib/audio/audio-utils';
 import { encodeAudioBufferToWav } from '@/lib/audio/wav-encoder';
 import {
   analyzeAudioProfile,
-  analyzeTranscriptionGaps,
-  generateSmartCutRegions,
+  detectSilenceFromWaveform,
+  refineWithTranscription,
+  type SmartSilenceRegion,
 } from '@/lib/audio/smart-silence-analyzer';
 import { EDITOR_CONFIG } from '@/lib/constants';
 import { formatDuration } from '@/lib/utils';
@@ -58,6 +60,7 @@ export function AICutPanel() {
   const [progressMsg, setProgressMsg] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [cutRegions, setCutRegions] = useState<AICutRegion[]>([]);
   const [showDetails, setShowDetails] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<{
@@ -66,6 +69,7 @@ export function AICutPanel() {
     totalFillerMs: number;
     speechPercentage: number;
     regionsCount: number;
+    usedTranscription: boolean;
   } | null>(null);
 
   // Aggressiveness setting
@@ -81,11 +85,11 @@ export function AICutPanel() {
   const getAggressivenessConfig = useCallback(() => {
     switch (aggressiveness) {
       case 'conservative':
-        return { minGapMs: 800, paddingMs: 150, includeFillers: false };
+        return { minDurationMs: 800, paddingMs: 150, includeFillers: false, thresholdOffset: 5 };
       case 'balanced':
-        return { minGapMs: 400, paddingMs: 80, includeFillers: true };
+        return { minDurationMs: 400, paddingMs: 100, includeFillers: true, thresholdOffset: 0 };
       case 'aggressive':
-        return { minGapMs: 200, paddingMs: 40, includeFillers: true };
+        return { minDurationMs: 200, paddingMs: 50, includeFillers: true, thresholdOffset: -5 };
     }
   }, [aggressiveness]);
 
@@ -93,6 +97,7 @@ export function AICutPanel() {
     if (!videoAsset || !currentProject) return;
 
     setError(null);
+    setWarning(null);
     setPhase('analyzing');
     setProgressPercent(0);
     setCutRegions([]);
@@ -114,102 +119,91 @@ export function AICutPanel() {
       setWaveformData(normalized);
 
       // Step 3: Analyze audio profile
-      setProgressMsg('Analisando perfil de áudio com IA...');
+      setProgressMsg('Analisando perfil de áudio...');
       setProgressPercent(25);
       const profile = analyzeAudioProfile(normalized, samplesPerSecond);
 
-      // Step 4: Transcribe
-      setProgressMsg('Transcrevendo áudio com IA (Whisper)...');
-      setProgressPercent(35);
-      const wavBlob = encodeAudioBufferToWav(audioBuffer);
-      const formData = new FormData();
-      formData.append('audio', wavBlob, 'audio.wav');
-      formData.append('assetId', videoAsset.id);
-      formData.append('projectId', currentProject.id);
-      formData.append('language', 'pt');
+      // Adjust threshold based on aggressiveness
+      const effectiveThreshold = profile.recommendedThresholdDb + config.thresholdOffset;
 
-      const response = await fetch('/api/transcription', {
-        method: 'POST',
-        body: formData,
-      });
+      // Step 4: PRIMARY — Detect silence from waveform (dB-based, always works)
+      setProgressMsg('Detectando silêncios no áudio...');
+      setProgressPercent(40);
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Erro na transcrição');
-      }
-
-      const words = data.transcription.words as { word: string; startMs: number; endMs: number }[];
-
-      // Store transcription for TextBasedEditor too
-      useTranscriptionStore.getState().setTranscription({
-        id: data.transcription.id,
-        fullText: data.transcription.fullText,
-        words: data.transcription.words,
-        segments: data.transcription.segments,
-      });
-
-      // Step 5: Analyze gaps between words using waveform validation
-      setProgressMsg('Analisando gaps entre falas...');
-      setProgressPercent(75);
-
-      const gaps = analyzeTranscriptionGaps(
-        words,
+      let silenceRegions: SmartSilenceRegion[] = detectSilenceFromWaveform(
         normalized,
         samplesPerSecond,
-        profile.recommendedThresholdDb
-      );
-
-      // Step 6: Generate smart cut regions
-      setProgressMsg('Gerando regiões de corte otimizadas...');
-      setProgressPercent(85);
-
-      const smartRegions = generateSmartCutRegions(
-        gaps,
-        config.minGapMs,
+        effectiveThreshold,
+        config.minDurationMs,
         config.paddingMs
       );
 
-      // Convert to AICutRegion format
-      const regions: AICutRegion[] = smartRegions.map((r) => {
-        // Find the corresponding gap to get context
-        const matchingGap = gaps.find(
-          (g) => g.startMs <= r.startMs + config.paddingMs + 10 && g.endMs >= r.endMs - config.paddingMs - 10
-        );
-        return {
-          startMs: r.startMs,
-          endMs: r.endMs,
-          durationMs: r.endMs - r.startMs,
-          type: 'gap' as const,
-          accepted: true,
-          label: matchingGap
-            ? `"${matchingGap.beforeWord}" → "${matchingGap.afterWord}"`
-            : 'Silêncio detectado',
-        };
-      });
+      // Step 5: OPTIONAL — Try to enhance with Whisper transcription
+      let usedTranscription = false;
+      setProgressMsg('Transcrevendo áudio com IA (Whisper)...');
+      setProgressPercent(55);
 
-      // Detect filler words and add them as cut regions if enabled
-      if (config.includeFillers && words.length > 0) {
-        const FILLER_WORDS = ['é', 'hm', 'hmm', 'um', 'uh', 'ah', 'eh', 'tipo', 'né', 'então', 'assim', 'enfim'];
-        for (const w of words) {
-          const cleaned = w.word.toLowerCase().replace(/[.,!?;:]/g, '');
-          if (FILLER_WORDS.includes(cleaned)) {
-            // Check if this filler region isn't already covered by a gap region
-            const alreadyCovered = regions.some(
-              (r) => r.startMs <= w.startMs && r.endMs >= w.endMs
-            );
-            if (!alreadyCovered) {
-              regions.push({
-                startMs: w.startMs,
-                endMs: w.endMs,
-                durationMs: w.endMs - w.startMs,
-                type: 'filler',
-                accepted: true,
-                label: `Filler: "${w.word}"`,
-              });
-            }
-          }
+      try {
+        const wavBlob = encodeAudioBufferToWav(audioBuffer);
+        const formData = new FormData();
+        formData.append('audio', wavBlob, 'audio.wav');
+        formData.append('assetId', videoAsset.id);
+        formData.append('projectId', currentProject.id);
+        formData.append('language', 'pt');
+
+        const response = await fetch('/api/transcription', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const words = data.transcription.words as { word: string; startMs: number; endMs: number }[];
+
+          // Store transcription for TextBasedEditor too
+          useTranscriptionStore.getState().setTranscription({
+            id: data.transcription.id,
+            fullText: data.transcription.fullText,
+            words: data.transcription.words,
+            segments: data.transcription.segments,
+          });
+
+          // Refine silence regions with word boundaries + detect fillers
+          setProgressMsg('Refinando cortes com transcrição...');
+          setProgressPercent(80);
+
+          silenceRegions = refineWithTranscription(
+            silenceRegions,
+            words,
+            config.paddingMs,
+            config.includeFillers
+          );
+
+          usedTranscription = true;
+        } else {
+          // Whisper failed — continue with dB-only results
+          const errData = await response.json().catch(() => null);
+          const errMsg = errData?.error || `HTTP ${response.status}`;
+          setWarning(`Transcrição indisponível (${errMsg}). Cortes baseados apenas em análise de áudio (dB).`);
         }
+      } catch (transcriptionErr) {
+        // Network or other error — continue with dB-only
+        setWarning('Transcrição falhou. Cortes baseados apenas em análise de áudio (dB).');
+        console.warn('Transcription enhancement failed:', transcriptionErr);
       }
+
+      // Step 6: Convert to AICutRegion format
+      setProgressMsg('Finalizando regiões de corte...');
+      setProgressPercent(90);
+
+      const regions: AICutRegion[] = silenceRegions.map((r) => ({
+        startMs: r.startMs,
+        endMs: r.endMs,
+        durationMs: r.durationMs,
+        type: r.type === 'filler' ? ('filler' as const) : ('gap' as const),
+        accepted: true,
+        label: r.label,
+      }));
 
       // Sort by startMs
       regions.sort((a, b) => a.startMs - b.startMs);
@@ -229,6 +223,7 @@ export function AICutPanel() {
         totalFillerMs,
         speechPercentage: profile.speechPercentage,
         regionsCount: regions.length,
+        usedTranscription,
       });
 
       // Mark regions on timeline for preview
@@ -269,6 +264,7 @@ export function AICutPanel() {
     setPhase('idle');
     setCutRegions([]);
     setAnalysisResult(null);
+    setWarning(null);
   }, [undo]);
 
   const toggleRegion = useCallback((index: number) => {
@@ -311,10 +307,9 @@ export function AICutPanel() {
       {phase === 'idle' && (
         <>
           <p className="text-[10px] text-text-muted leading-relaxed">
-            O AI CUT combina <strong>transcrição</strong> (Whisper) com{' '}
-            <strong>análise de áudio</strong> (dB) para identificar e cortar
-            silêncios com máxima precisão. A IA analisa onde cada fala começa
-            e termina, valida com o nível de áudio, e gera cortes otimizados.
+            O AI CUT usa <strong>análise de áudio (dB)</strong> para detectar
+            silêncios e, quando disponível, <strong>transcrição (Whisper)</strong>{' '}
+            para refinar os pontos de corte com precisão nas bordas das palavras.
           </p>
 
           {/* Aggressiveness */}
@@ -353,12 +348,12 @@ export function AICutPanel() {
           {/* Features */}
           <div className="p-2 rounded-md bg-bg-surface/50 border border-border-default/30 space-y-1.5">
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
-              <Subtitles size={10} className="text-accent-primary flex-shrink-0" />
-              <span>Transcrição com word-level timing (Whisper)</span>
+              <Volume2 size={10} className="text-accent-primary flex-shrink-0" />
+              <span>Detecção de silêncio por análise de áudio (dB)</span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
-              <Volume2 size={10} className="text-accent-primary flex-shrink-0" />
-              <span>Análise de dB para validação de silêncio</span>
+              <Subtitles size={10} className="text-accent-primary flex-shrink-0" />
+              <span>Refinamento com transcrição Whisper (quando disponível)</span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-text-secondary">
               <Wand2 size={10} className="text-accent-primary flex-shrink-0" />
@@ -404,14 +399,22 @@ export function AICutPanel() {
               Analisar perfil de áudio
             </div>
             <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${progressPercent >= 75 ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
-              Transcrever com Whisper
+              <div className={`w-1.5 h-1.5 rounded-full ${progressPercent >= 40 ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
+              Detectar silêncios (dB)
             </div>
             <div className="flex items-center gap-1.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${progressPercent >= 85 ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
-              Gerar cortes inteligentes
+              <div className={`w-1.5 h-1.5 rounded-full ${progressPercent >= 80 ? 'bg-accent-success' : 'bg-text-muted/30'}`} />
+              Refinar com transcrição (Whisper)
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Warning (e.g. Whisper unavailable) */}
+      {warning && (
+        <div className="p-2 rounded-md bg-accent-warning/10 border border-accent-warning/20 flex items-start gap-2">
+          <AlertTriangle size={12} className="text-accent-warning flex-shrink-0 mt-0.5" />
+          <p className="text-[10px] text-accent-warning/90">{warning}</p>
         </div>
       )}
 
@@ -438,10 +441,16 @@ export function AICutPanel() {
                 {analysisResult.regionsCount} regiões de corte identificadas
               </p>
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] text-text-muted">
-                <span>Gaps de silêncio: <span className="text-text-secondary font-mono">{formatDuration(analysisResult.totalGapMs)}</span></span>
+                <span>Silêncios: <span className="text-text-secondary font-mono">{formatDuration(analysisResult.totalGapMs)}</span></span>
                 <span>Filler words: <span className="text-text-secondary font-mono">{formatDuration(analysisResult.totalFillerMs)}</span></span>
                 <span>Total removível: <span className="text-text-secondary font-mono">{formatDuration(analysisResult.totalSilenceMs)}</span></span>
                 <span>Fala no vídeo: <span className="text-text-secondary font-mono">{analysisResult.speechPercentage}%</span></span>
+              </div>
+              <div className="text-[9px] text-text-muted mt-1">
+                {analysisResult.usedTranscription
+                  ? <span className="text-accent-success">Refinado com transcrição Whisper</span>
+                  : <span className="text-accent-warning">Baseado em análise de áudio (dB)</span>
+                }
               </div>
             </div>
           )}
@@ -578,6 +587,7 @@ export function AICutPanel() {
                 setPhase('idle');
                 setCutRegions([]);
                 setAnalysisResult(null);
+                setWarning(null);
               }}
             >
               Novo corte
@@ -589,9 +599,8 @@ export function AICutPanel() {
       {/* Initial hint */}
       {phase === 'idle' && !error && (
         <p className="text-center text-[9px] text-text-muted py-1 leading-relaxed">
-          O AI CUT usa transcrição + análise de áudio para identificar
-          precisamente onde cada fala começa e termina. Mais preciso que
-          corte por dB ou legendas individualmente.
+          Funciona mesmo sem API de transcrição configurada.
+          Com Whisper ativado, os cortes ficam ainda mais precisos.
         </p>
       )}
     </div>

@@ -82,11 +82,11 @@ export function analyzeAudioProfile(
   const effectiveSpeechDb = speechCount > 0 ? speechLevelDb : -15;
   const effectiveNoiseDb = noiseFloorCount > 0 ? noiseFloorDb : -50;
 
-  // Recommended threshold: place it at 30% between noise floor and speech level
-  // This biases towards capturing more silence (closer to noise floor)
+  // Recommended threshold: place it at 50% between noise floor and speech level
+  // This gives a balanced detection — not too aggressive, not too conservative
   const gap = effectiveSpeechDb - effectiveNoiseDb;
   const recommendedThresholdDb = Math.round(
-    effectiveNoiseDb + gap * 0.35
+    effectiveNoiseDb + gap * 0.5
   );
 
   // Analyze speech segments to determine tempo
@@ -176,13 +176,193 @@ export function analyzeAudioProfile(
 }
 
 /**
- * Uses transcription word timings combined with waveform data
- * to create precise cut regions.
+ * Primary silence detection using dB analysis (waveform-based).
+ * This is the reliable core — works without any external API.
  *
- * This is the core of the "AI CUT" feature - it uses word-level timestamps
- * from the transcription to precisely identify where speech starts/ends,
- * then validates against dB levels to ensure accuracy.
+ * Uses a smoothing window to avoid false positives from momentary dips.
  */
+export interface SmartSilenceRegion {
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  avgDb: number;
+  type: 'silence' | 'filler';
+  label: string;
+}
+
+export function detectSilenceFromWaveform(
+  waveformData: number[],
+  samplesPerSecond: number,
+  thresholdDb: number,
+  minDurationMs: number,
+  paddingMs: number
+): SmartSilenceRegion[] {
+  const msPerSample = 1000 / samplesPerSecond;
+  const regions: SmartSilenceRegion[] = [];
+
+  // Use a smoothing window (50ms) to avoid false triggers from momentary dips
+  const smoothWindowSamples = Math.max(1, Math.round((50 / 1000) * samplesPerSecond));
+
+  let silenceStart: number | null = null;
+  let dbAccumulator = 0;
+  let dbCount = 0;
+
+  for (let i = 0; i < waveformData.length; i++) {
+    // Calculate smoothed dB over window
+    let windowSum = 0;
+    let windowCount = 0;
+    const windowStart = Math.max(0, i - Math.floor(smoothWindowSamples / 2));
+    const windowEnd = Math.min(waveformData.length - 1, i + Math.floor(smoothWindowSamples / 2));
+    for (let j = windowStart; j <= windowEnd; j++) {
+      windowSum += waveformData[j];
+      windowCount++;
+    }
+    const smoothedAmplitude = windowSum / windowCount;
+    const db = amplitudeToDb(smoothedAmplitude);
+    const currentMs = i * msPerSample;
+
+    if (db < thresholdDb) {
+      if (silenceStart === null) {
+        silenceStart = currentMs;
+        dbAccumulator = 0;
+        dbCount = 0;
+      }
+      if (db > -80) {
+        dbAccumulator += db;
+        dbCount++;
+      }
+    } else {
+      if (silenceStart !== null) {
+        const rawDuration = currentMs - silenceStart;
+        if (rawDuration >= minDurationMs) {
+          const avgDb = dbCount > 0 ? Math.round((dbAccumulator / dbCount) * 10) / 10 : -60;
+          const paddedStart = Math.max(0, silenceStart + paddingMs);
+          const paddedEnd = Math.max(paddedStart, currentMs - paddingMs);
+          if (paddedEnd - paddedStart > 30) {
+            regions.push({
+              startMs: paddedStart,
+              endMs: paddedEnd,
+              durationMs: paddedEnd - paddedStart,
+              avgDb,
+              type: 'silence',
+              label: `Silêncio (${avgDb.toFixed(1)} dB)`,
+            });
+          }
+        }
+        silenceStart = null;
+      }
+    }
+  }
+
+  // Handle trailing silence
+  if (silenceStart !== null) {
+    const endMs = waveformData.length * msPerSample;
+    const rawDuration = endMs - silenceStart;
+    if (rawDuration >= minDurationMs) {
+      const avgDb = dbCount > 0 ? Math.round((dbAccumulator / dbCount) * 10) / 10 : -60;
+      const paddedStart = Math.max(0, silenceStart + paddingMs);
+      const paddedEnd = Math.max(paddedStart, endMs - paddingMs);
+      if (paddedEnd - paddedStart > 30) {
+        regions.push({
+          startMs: paddedStart,
+          endMs: paddedEnd,
+          durationMs: paddedEnd - paddedStart,
+          avgDb,
+          type: 'silence',
+          label: `Silêncio (${avgDb.toFixed(1)} dB)`,
+        });
+      }
+    }
+  }
+
+  return regions;
+}
+
+/**
+ * Refines silence regions using word-level transcription data.
+ * Snaps cut boundaries to word edges for cleaner cuts.
+ * Also detects filler words.
+ *
+ * This is an ENHANCEMENT — the base dB detection works without it.
+ */
+export function refineWithTranscription(
+  silenceRegions: SmartSilenceRegion[],
+  words: { word: string; startMs: number; endMs: number }[],
+  paddingMs: number,
+  includeFillers: boolean
+): SmartSilenceRegion[] {
+  if (words.length === 0) return silenceRegions;
+
+  const refined = silenceRegions.map((region) => {
+    // Find the closest word BEFORE the silence start
+    let closestBefore: { word: string; endMs: number } | null = null;
+    // Find the closest word AFTER the silence end
+    let closestAfter: { word: string; startMs: number } | null = null;
+
+    for (const w of words) {
+      if (w.endMs <= region.startMs + paddingMs * 2 && w.endMs >= region.startMs - 200) {
+        if (!closestBefore || w.endMs > closestBefore.endMs) {
+          closestBefore = w;
+        }
+      }
+      if (w.startMs >= region.endMs - paddingMs * 2 && w.startMs <= region.endMs + 200) {
+        if (!closestAfter || w.startMs < closestAfter.startMs) {
+          closestAfter = w;
+        }
+      }
+    }
+
+    // Snap to word boundaries (with padding)
+    const snappedStart = closestBefore
+      ? Math.max(region.startMs, closestBefore.endMs + paddingMs)
+      : region.startMs;
+    const snappedEnd = closestAfter
+      ? Math.min(region.endMs, closestAfter.startMs - paddingMs)
+      : region.endMs;
+
+    // Build a better label
+    const beforeLabel = closestBefore ? `"${closestBefore.word}"` : '...';
+    const afterLabel = closestAfter ? `"${closestAfter.word}"` : '...';
+
+    if (snappedEnd - snappedStart < 30) return null;
+
+    return {
+      ...region,
+      startMs: snappedStart,
+      endMs: snappedEnd,
+      durationMs: snappedEnd - snappedStart,
+      label: `${beforeLabel} → ${afterLabel}`,
+    };
+  }).filter((r): r is SmartSilenceRegion => r !== null);
+
+  // Detect filler words and add them if not already inside a silence region
+  if (includeFillers) {
+    const FILLER_WORDS = ['é', 'hm', 'hmm', 'um', 'uh', 'ah', 'eh', 'tipo', 'né', 'então', 'assim', 'enfim'];
+    for (const w of words) {
+      const cleaned = w.word.toLowerCase().replace(/[.,!?;:]/g, '');
+      if (FILLER_WORDS.includes(cleaned)) {
+        const alreadyCovered = refined.some(
+          (r) => r.startMs <= w.startMs && r.endMs >= w.endMs
+        );
+        if (!alreadyCovered) {
+          refined.push({
+            startMs: w.startMs,
+            endMs: w.endMs,
+            durationMs: w.endMs - w.startMs,
+            avgDb: 0,
+            type: 'filler',
+            label: `Filler: "${w.word}"`,
+          });
+        }
+      }
+    }
+    refined.sort((a, b) => a.startMs - b.startMs);
+  }
+
+  return refined;
+}
+
+// Keep legacy exports for backward compatibility with SilenceCutPanel
 export interface TranscriptionGap {
   startMs: number;
   endMs: number;
@@ -209,10 +389,8 @@ export function analyzeTranscriptionGaps(
     const gapEnd = words[i + 1].startMs;
     const gapDuration = gapEnd - gapStart;
 
-    // Only consider gaps > 50ms (natural micro-pauses are shorter)
     if (gapDuration <= 50) continue;
 
-    // Measure average dB in the gap region from waveform
     const startSample = Math.floor(gapStart / msPerSample);
     const endSample = Math.min(
       waveformData.length - 1,
@@ -247,32 +425,24 @@ export function analyzeTranscriptionGaps(
   return gaps;
 }
 
-/**
- * Generates optimized cut regions by combining transcription gaps
- * with a minimum gap threshold. Merges adjacent small gaps.
- */
 export function generateSmartCutRegions(
   gaps: TranscriptionGap[],
   minGapMs: number = 200,
   paddingMs: number = 80
 ): { startMs: number; endMs: number }[] {
-  // Filter gaps that are silent and above minimum duration
   const cuttableGaps = gaps.filter(
     (g) => g.isSilent && g.durationMs >= minGapMs
   );
 
   if (cuttableGaps.length === 0) return [];
 
-  // Apply padding to each gap
   const regions = cuttableGaps.map((g) => ({
     startMs: Math.max(0, g.startMs + paddingMs),
     endMs: Math.max(g.startMs + paddingMs, g.endMs - paddingMs),
   }));
 
-  // Filter out regions that became too small after padding
   const validRegions = regions.filter((r) => r.endMs - r.startMs > 30);
 
-  // Merge overlapping regions
   if (validRegions.length <= 1) return validRegions;
 
   const sorted = [...validRegions].sort((a, b) => a.startMs - b.startMs);
@@ -281,7 +451,6 @@ export function generateSmartCutRegions(
   for (let i = 1; i < sorted.length; i++) {
     const last = merged[merged.length - 1];
     if (sorted[i].startMs <= last.endMs + 100) {
-      // Merge if within 100ms
       last.endMs = Math.max(last.endMs, sorted[i].endMs);
     } else {
       merged.push(sorted[i]);
